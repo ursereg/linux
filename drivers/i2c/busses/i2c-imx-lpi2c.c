@@ -436,6 +436,7 @@ static void lpi2c_imx_write_txfifo(struct lpi2c_imx_struct *lpi2c_imx)
 		complete(&lpi2c_imx->complete);
 }
 
+#ifdef CONFIG_PM_SLEEP
 static void lpi2c_imx_read_rxfifo(struct lpi2c_imx_struct *lpi2c_imx)
 {
 	unsigned int blocklen, remaining;
@@ -482,6 +483,7 @@ static void lpi2c_imx_read_rxfifo(struct lpi2c_imx_struct *lpi2c_imx)
 
 	lpi2c_imx_intctrl(lpi2c_imx, MIER_RDIE);
 }
+#endif
 
 static void lpi2c_imx_write(struct lpi2c_imx_struct *lpi2c_imx,
 			    struct i2c_msg *msgs)
@@ -513,11 +515,12 @@ static int lpi2c_imx_xfer(struct i2c_adapter *adapter,
 	struct lpi2c_imx_struct *lpi2c_imx = i2c_get_adapdata(adapter);
 	unsigned int temp;
 	int i, result;
+	int recovery_retry = 5;
 
 	result = lpi2c_imx_master_enable(lpi2c_imx);
 	if (result)
 		return result;
-
+init:
 	for (i = 0; i < num; i++) {
 		result = lpi2c_imx_start(lpi2c_imx, &msgs[i]);
 		if (result)
@@ -553,6 +556,16 @@ static int lpi2c_imx_xfer(struct i2c_adapter *adapter,
 stop:
 	lpi2c_imx_stop(lpi2c_imx);
 
+	if ((result == -ETIMEDOUT) && recovery_retry--) {
+		if (lpi2c_imx->adapter.bus_recovery_info) {
+			i2c_recover_bus(&lpi2c_imx->adapter);
+			dev_dbg(&lpi2c_imx->adapter.dev,
+				"<%s> i2c_recover_bus. retry=%d\n",
+				__func__, recovery_retry);
+			goto init;
+		}
+	}
+
 	temp = readl(lpi2c_imx->base + LPI2C_MSR);
 	if ((temp & MSR_NDF) && !result)
 		result = -EIO;
@@ -567,6 +580,7 @@ disable:
 	return (result < 0) ? result : num;
 }
 
+#ifdef CONFIG_PM_SLEEP
 static irqreturn_t lpi2c_imx_isr(int irq, void *dev_id)
 {
 	struct lpi2c_imx_struct *lpi2c_imx = dev_id;
@@ -588,6 +602,7 @@ static irqreturn_t lpi2c_imx_isr(int irq, void *dev_id)
 ret:
 	return IRQ_HANDLED;
 }
+#endif
 
 static void lpi2c_imx_prepare_recovery(struct i2c_adapter *adap)
 {

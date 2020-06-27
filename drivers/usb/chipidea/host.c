@@ -42,6 +42,7 @@ static int (*orig_hub_control)(struct usb_hcd *hcd,
 
 struct ehci_ci_priv {
 	struct regulator *reg_vbus;
+	bool enabled;
 };
 
 /* This function is used to override WKCN, WKDN, and WKOC */
@@ -67,7 +68,7 @@ static int ehci_ci_portpower(struct usb_hcd *hcd, int portnum, bool enable)
 	int ret = 0;
 	int port = HCS_N_PORTS(ehci->hcs_params);
 
-	if (priv->reg_vbus) {
+	if (priv->reg_vbus && enable != priv->enabled) {
 		if (port > 1) {
 			dev_warn(dev,
 				"Not support multi-port regulator control\n");
@@ -83,6 +84,7 @@ static int ehci_ci_portpower(struct usb_hcd *hcd, int portnum, bool enable)
 				enable ? "enable" : "disable", ret);
 			return ret;
 		}
+		priv->enabled = enable;
 	}
 
 	if (enable && (ci->platdata->phy_mode == USBPHY_INTERFACE_MODE_HSIC)) {
@@ -201,7 +203,7 @@ static int ci_imx_ehci_hub_control(
 {
 	struct ehci_hcd	*ehci = hcd_to_ehci(hcd);
 	u32 __iomem	*status_reg;
-	u32		temp;
+	u32		temp, suspend_line_state;
 	unsigned long	flags;
 	int		retval = 0;
 	struct device *dev = hcd->self.controller;
@@ -229,6 +231,16 @@ static int ci_imx_ehci_hub_control(
 		if (ehci_handshake(ehci, status_reg, PORT_SUSPEND,
 						PORT_SUSPEND, 5000))
 			ehci_err(ehci, "timeout waiting for SUSPEND\n");
+
+		if (ci->platdata->flags & CI_HDRC_HOST_SUSP_PHY_LPM) {
+			if (PORT_SPEED_LOW(temp))
+				suspend_line_state = PORTSC_LS_K;
+			else
+				suspend_line_state = PORTSC_LS_J;
+			if (!ehci_handshake(ehci, status_reg, PORTSC_LS,
+					   suspend_line_state, 5000))
+				ci_hdrc_enter_lpm(ci, true);
+		}
 
 		if (ci->platdata->flags & CI_HDRC_IMX_IS_HSIC) {
 			if (ci->platdata->notify_event)

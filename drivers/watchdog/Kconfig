@@ -165,7 +165,7 @@ config MCA_WATCHDOG
 	tristate "Digi ConnectCore SOMs Micro Controller Assist Watchdog"
 	select WATCHDOG_CORE
 	select MFD_MCA_CC6UL if SOC_IMX6UL
-	select MFD_MCA_CC8X if ARCH_FSL_IMX8QXP
+	select MFD_MCA_CC8 if (ARCH_FSL_IMX8QXP || ARCH_FSL_IMX8MM || ARCH_FSL_IMX8MN)
 	help
 	  If you say yes here you will get support for the watchdog in the Micro Controller Assist of Digi ConnectCore system-on-modules.
 
@@ -571,6 +571,7 @@ config MAX63XX_WATCHDOG
 config MAX77620_WATCHDOG
 	tristate "Maxim Max77620 Watchdog Timer"
 	depends on MFD_MAX77620 || COMPILE_TEST
+	select WATCHDOG_CORE
 	help
 	 This is the driver for the Max77620 watchdog timer.
 	 Say 'Y' here to enable the watchdog timer support for

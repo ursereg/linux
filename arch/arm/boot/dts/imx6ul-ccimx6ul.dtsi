@@ -77,10 +77,12 @@
 	pinctrl-1 = <&pinctrl_i2c1_gpio>;
 	scl-gpios = <&gpio1 28 GPIO_ACTIVE_HIGH>;
 	sda-gpios = <&gpio1 29 GPIO_ACTIVE_HIGH>;
+	digi,atecc508a-workaround;
+	digi,atecc508a-sleep-delay-uS = <1000>;
 	status = "okay";
 
 	mca_cc6ul: mca@7e {
-		compatible = "digi,mca_cc6ul_dt_ids";
+		compatible = "digi,mca-cc6ul";
 		reg = <0x7e>;
 		interrupt-parent = <&gpio5>;
 		interrupts = <4 IRQ_TYPE_EDGE_FALLING>;
@@ -115,6 +117,7 @@
 		pwrkey {
 			compatible = "digi,mca-cc6ul-pwrkey";
 			digi,key-power;
+			digi,key-power-up;
 			digi,key-sleep;
 			digi,debounce-ms = <100>;
 			digi,pwroff-delay-sec = <6>;
