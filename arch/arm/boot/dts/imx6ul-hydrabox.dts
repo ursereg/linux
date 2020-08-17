@@ -113,19 +113,6 @@
    //};
 };
 
-pinctrl_i2c2: i2c2grp {
-			fsl,pins = <
-				MX6UL_PAD_GPIO1_IO00__I2C2_SCL 0x4001b8b0
-				MX6UL_PAD_GPIO1_IO01__I2C2_SDA 0x4001b8b0
-			>;
-		};
-
-pinctrl_i2c2_gpio: i2c2gpiogrp {
-    fsl,pins = <
-        MX6UL_PAD_GPIO1_IO00__GPIO1_IO00 0x1b0b0
-        MX6UL_PAD_GPIO1_IO01__GPIO1_IO01 0x1b0b0
-    >;
-};
 
 /* MCA IO0 connected to Grove ADC connector.
  * This currently not connected.
@@ -233,6 +220,13 @@ pinctrl_i2c2_gpio: i2c2gpiogrp {
                MX6UL_PAD_GPIO1_IO01__I2C2_SDA 0x4001b8b0
            >;
        };
+
+        pinctrl_i2c2_gpio: i2c2gpiogrp {
+            fsl,pins = <
+                MX6UL_PAD_GPIO1_IO00__GPIO1_IO00 0x1b0b0
+                MX6UL_PAD_GPIO1_IO01__GPIO1_IO01 0x1b0b0
+            >;
+        };
        pinctrl_uart2_2wires: uart2grp_2wires {
 	       fsl,pins = <
                MX6UL_PAD_UART2_TX_DATA__UART2_DCE_TX	0x1b0b1
