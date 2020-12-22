@@ -1,0 +1,248 @@
+/*
+ * Copyright 2016, 2017 Digi International, Inc.
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
+ */
+
+/dts-v1/;
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+/* i.MX6 UltraLite CPU */
+#include "imx6ul.dtsi"
+/* ConnectCore 6UL (wireless/bluetooth variant) */
+#include "imx6ul-ccimx6ul-wb.dtsi"
+/* ConnectCore 6UL StarterBoard */
+#include "imx6ul-ccimx6ulstarter.dtsi"
+
+/*
+ * Uncomment to enable the i.MX6UL SoC ADCs.
+ * Include in adc-ch-list the ADC channels (from 0 to 9) that you want to
+ * enable. Note that the iomux has to be configured accordingly in pinctrl_adc1
+ * to configure the pad for ADC operation
+ */
+&adc1 {
+   pinctrl-names = "default";
+   pinctrl-0 = <&pinctrl_adc1>;
+   adc-ch-list = <4>;
+   status = "okay";
+};
+
+&caam_keyblob {
+	status = "okay";
+};
+
+/* ECSPI3 (as master - Raspberry PI Expansion header) */
+// &ecspi3 {
+// 	/*
+// 	 * There are no SPI slave devices on the SBC.
+// 	 * Enable if adding your slave devices below.
+// 	 */
+// 	status = "okay";
+//
+// 	/*
+// 	 * Add your slave devices here. Next is an example of spidev.
+// 	 * Expect a harmless kernel warning if you enable spidev as slave.
+// 	 */
+// 	spidev@0 {
+// 		reg = <0>;
+// 		compatible = "spidev";
+// 		spi-max-frequency = <1000000>;
+// 	};
+// };
+
+/* ECSPI3 (as slave - Raspberry PI Expansion header) */
+// &ecspi3 {
+// 	pinctrl-0 = <&pinctrl_ecspi3_slave>;
+// 	spi-slave;
+// 	status = "okay";
+//
+// 	/*
+// 	 * Unique slave node. Property 'compatible' must be set to the
+// 	 * slave driver that will be registered by default.
+// 	 */
+// 	slave@0 {
+// 		reg = <0>;	/* must match the used CS line */
+// 		compatible = "spidev";
+// 		spi-max-frequency = <1000000>;
+// 	};
+// };
+
+&fec1 {
+	status = "okay";
+};
+
+/* CAN1 */
+&can1 {
+	status = "okay";
+};
+
+/* I2C2 */
+&i2c2 {
+   /*
+   status = "okay";
+   clock-frequency = <100000>;
+   pinctrl-names = "default";
+   pinctrl-0 = <&pinctrl_i2c2>;
+   status = "okay";
+   */
+    pinctrl-names = "default", "gpio";
+    pinctrl-0 = <&pinctrl_i2c2>;
+    pinctrl-1 = <&pinctrl_i2c2_gpio>;
+    scl-gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+    sda-gpios = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+    status = "okay";
+
+   /*
+    * Reference block.
+    *
+    * Add the peripherals connected to the I2C.
+    */
+   //fusion_touch: fusion@14 {
+   //  compatible = "touchrev,fusion-touch";
+   //  reg = <0x14>;
+   //  pinctrl-names = "default";
+   //  pinctrl-0 = <&pinctrl_fusion_touch>;
+   //  interrupt-parent = <&gpio5>;
+   //  interrupts = <2 IRQ_TYPE_EDGE_RISING>;
+   //  status = "disabled";
+   //};
+};
+
+
+/* MCA IO0 connected to Grove ADC connector.
+ * This currently not connected.
+ */
+&mca_adc {
+	digi,adc-ch-list = <4>;
+	digi,adc-vref = <3000000>;
+};
+
+/* Uncomment to Enable Tamper detection. There are 2 digital (0 and 1) and 2
+ * analog (2 and 3) tamper interfaces.
+ */
+//&mca_tamper {
+//	digi,tamper-if-list = <0 1 2 3>;
+//};
+
+/* PWM1 (Raspberry PI Expansion header) */
+&pwm1 {
+	status = "okay";
+};
+
+/* UART2 */
+&uart2 {
+	/* RTS/CTS lines multiplexed with CAN2 */
+	/* 
+    pinctrl-names = "default";    
+    pinctrl-0 = <&pinctrl_uart2_4wires>; 
+    */
+    
+    pinctrl-names = "default";    
+	pinctrl-0 = <&pinctrl_uart2_2wires>;
+    
+    /*
+    pinctrl-names = "default";
+    pinctrl-0 = <&pinctrl_uart2_4wires>;
+    rs485-rts-active-high;
+    rs485-rx-during-tx;
+    rs485-rts-delay = <1 1>;
+    linux,rs485-enabled-at-boot-time;
+    */
+    status = "okay";
+};
+
+/* UART4 (Raspberry PI Expansion header) */
+&uart4 {
+	status = "okay";
+};
+
+/* UART5 (Console) */
+&uart5 {
+	status = "okay";
+};
+
+&usbotg1 {
+	status = "okay";
+};
+
+&usbotg2 {
+	status = "okay";
+};
+
+/* USDHC2 (microSD) */
+&usdhc2 {
+	status = "okay";
+};
+
+&iomuxc {
+   pinctrl-0 = <&pinctrl_hog>;
+   imx6ul-ccimx6ul {
+       pinctrl_hog: hoggrp {
+           fsl,pins = <
+               /* USB_OTG1_VBUS */
+               MX6UL_PAD_CSI_MCLK__GPIO4_IO17 0x10b0
+               /* USB_OTG2_VBUS */
+               MX6UL_PAD_CSI_PIXCLK__GPIO4_IO18 0x10b0
+               /* OC_DRIVE */
+               MX6UL_PAD_LCD_DATA05__GPIO3_IO10 0x10b0
+               /* OC_SENSE */
+               MX6UL_PAD_LCD_DATA07__GPIO3_IO12 0x10b0
+               /* SPI_RESET */
+               MX6UL_PAD_LCD_DATA01__GPIO3_IO06 0x10b0
+               /* USER_LED */
+               MX6UL_PAD_LCD_DATA06__GPIO3_IO11 0x10b0
+               /* USER_BUTTON */
+               MX6UL_PAD_LCD_VSYNC__GPIO3_IO03 0x10b0
+               /* GPS_RESET */
+               MX6UL_PAD_LCD_DATA00__GPIO3_IO05 0x10b0
+               /* 3G_RESET */
+               MX6UL_PAD_LCD_DATA03__GPIO3_IO08 0x10b0
+               /* 3G_POWER */
+               MX6UL_PAD_LCD_DATA02__GPIO3_IO07 0x10b0
+               /* SPI Header pins */
+               MX6UL_PAD_UART2_CTS_B__GPIO1_IO22 0x10b0
+               MX6UL_PAD_UART2_RTS_B__GPIO1_IO23 0x10b0
+           >;
+       };
+       pinctrl_adc1: adc1grp {
+           fsl,pins = <
+               MX6UL_PAD_GPIO1_IO04__GPIO1_IO04 0xb0
+           >;
+       };
+       pinctrl_i2c2: i2c2grp {
+           fsl,pins = <
+               MX6UL_PAD_GPIO1_IO00__I2C2_SCL 0x4001b8b0
+               MX6UL_PAD_GPIO1_IO01__I2C2_SDA 0x4001b8b0
+           >;
+       };
+
+        pinctrl_i2c2_gpio: i2c2gpiogrp {
+            fsl,pins = <
+                MX6UL_PAD_GPIO1_IO00__GPIO1_IO00 0x1b0b0
+                MX6UL_PAD_GPIO1_IO01__GPIO1_IO01 0x1b0b0
+            >;
+        };
+       pinctrl_uart2_2wires: uart2grp_2wires {
+	       fsl,pins = <
+               MX6UL_PAD_UART2_TX_DATA__UART2_DCE_TX	0x1b0b1
+               MX6UL_PAD_UART2_RX_DATA__UART2_DCE_RX	0x1b0b1
+           >;
+       };
+       pinctrl_uart2_4wires: uart2grp_4wires {
+            fsl,pins = <
+                MX6UL_PAD_UART2_TX_DATA__UART2_DCE_TX	0x1b0b1
+                MX6UL_PAD_UART2_RX_DATA__UART2_DCE_RX	0x1b0b1
+                MX6UL_PAD_UART2_CTS_B__UART2_DCE_CTS	0x1b0b1
+                MX6UL_PAD_UART2_RTS_B__UART2_DCE_RTS	0x1b0b1
+            >;
+        };
+   };
+
+};
+
+
