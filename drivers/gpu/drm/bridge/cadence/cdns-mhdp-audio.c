@@ -14,10 +14,11 @@
  */
 #include <linux/clk.h>
 #include <linux/reset.h>
-#include <drm/bridge/cdns-mhdp-common.h>
+#include <drm/bridge/cdns-mhdp.h>
 #include <sound/hdmi-codec.h>
 #include <drm/drm_of.h>
-#include <drm/drmP.h>
+#include <drm/drm_vblank.h>
+#include <drm/drm_print.h>
 
 #define CDNS_DP_SPDIF_CLK		200000000
 
@@ -151,7 +152,7 @@ static void cdns_mhdp_audio_config_i2s(struct cdns_mhdp_device *mhdp,
 	u32 transmission_type = 0; /* not required for L-PCM */
 
 	if (numofchannels == 2) {
-		if (mhdp->dp.link.num_lanes == 1)
+		if (mhdp->dp.num_lanes == 1)
 			sub_pckt_num = 2;
 		else
 			sub_pckt_num = 4;
@@ -379,11 +380,21 @@ static int audio_get_eld(struct device *dev, void *data,
 	return 0;
 }
 
+static int audio_hook_plugged_cb(struct device *dev, void *data,
+				 hdmi_codec_plugged_cb fn,
+				 struct device *codec_dev)
+{
+	struct cdns_mhdp_device *mhdp = dev_get_drvdata(dev);
+
+	return cdns_hdmi_set_plugged_cb(mhdp, fn, codec_dev);
+}
+
 static const struct hdmi_codec_ops audio_codec_ops = {
 	.hw_params = audio_hw_params,
 	.audio_shutdown = audio_shutdown,
 	.digital_mute = audio_digital_mute,
 	.get_eld = audio_get_eld,
+	.hook_plugged_cb = audio_hook_plugged_cb,
 };
 
 int cdns_mhdp_register_audio_driver(struct device *dev)

@@ -198,7 +198,7 @@ static const struct imx_rproc_att imx_rproc_att_imx8mn[] = {
 	/* QSPI Code - alias */
 	{ 0x08000000, 0x08000000, 0x08000000, 0 },
 	/* DDR (Code) - alias */
-	{ 0x10000000, 0x80000000, 0x0FFE0000, 0 },
+	{ 0x10000000, 0x40000000, 0x0FFE0000, 0 },
 	/* DTCM */
 	{ 0x20000000, 0x00800000, 0x00020000, ATT_OWN },
 	/* OCRAM_S - alias */
@@ -226,11 +226,9 @@ static const struct imx_rproc_att imx_rproc_att_imx8mq[] = {
 	/* QSPI Code - alias */
 	{ 0x08000000, 0x08000000, 0x08000000, 0 },
 	/* DDR (Code) - alias */
-	{ 0x10000000, 0x80000000, 0x0FFE0000, 0 },
-	/* TCML */
-	{ 0x1FFE0000, 0x007E0000, 0x00020000, ATT_OWN },
-	/* TCMU */
-	{ 0x20000000, 0x00800000, 0x00020000, ATT_OWN },
+	{ 0x10000000, 0x40000000, 0x0FFE0000, 0 },
+	/* TCML/U */
+	{ 0x1FFE0000, 0x007E0000, 0x00040000, ATT_OWN },
 	/* OCRAM_S */
 	{ 0x20180000, 0x00180000, 0x00008000, ATT_OWN },
 	/* OCRAM */
@@ -582,8 +580,11 @@ static int imx_rproc_elf_load_segments(struct rproc *rproc,
 {
 	struct imx_rproc *priv = rproc->priv;
 
-	if (!priv->early_boot)
+	if (!priv->early_boot) {
+		if (!fw)
+			return -EINVAL;
 		return rproc_elf_load_segments(rproc, fw);
+	}
 
 	return 0;
 }
@@ -920,6 +921,9 @@ static int imx_rproc_configure_mode(struct imx_rproc *priv)
 	} else if (of_get_property(dev->of_node, "early-booted", NULL)) {
 		priv->early_boot = true;
 	} else {
+		if (!priv->regmap)
+			return -ENODEV;
+
 		ret = regmap_read(priv->regmap, dcfg->src_reg, &val);
 		if (ret) {
 			dev_err(dev, "Failed to read src\n");

@@ -129,6 +129,7 @@ static void dec_frame(struct vpu_frame_info *frame);
 static int submit_input_and_encode(struct vpu_ctx *ctx);
 static int process_stream_output(struct vpu_ctx *ctx);
 static u32 get_ptr(u32 ptr);
+static int is_vpu_enc_poweroff(struct core_device *core);
 
 static char *get_event_str(u32 event)
 {
@@ -234,19 +235,6 @@ static void count_encoded_frame(struct vpu_ctx *ctx)
 	attr->statistic.encoded_count++;
 }
 
-static void count_timestamp_overwrite(struct vpu_ctx *ctx)
-{
-	struct vpu_attr *attr = NULL;
-
-	WARN_ON(!ctx);
-
-	attr = get_vpu_ctx_attr(ctx);
-	if (!attr)
-		return;
-
-	attr->statistic.timestamp_overwrite++;
-}
-
 static void write_vpu_reg(struct vpu_dev *dev, u32 val, off_t reg)
 {
 	writel(val, dev->regs_base + reg);
@@ -334,12 +322,7 @@ static int vpu_enc_v4l2_ioctl_querycap(struct file *file,
 	strlcpy(cap->driver, "vpu encoder", sizeof(cap->driver));
 	strlcpy(cap->card, "vpu encoder", sizeof(cap->card));
 	strlcpy(cap->bus_info, "platform:", sizeof(cap->bus_info));
-	cap->version = KERNEL_VERSION(0, 0, 1);
-	cap->device_caps = V4L2_CAP_VIDEO_M2M_MPLANE |
-				V4L2_CAP_STREAMING |
-				V4L2_CAP_VIDEO_CAPTURE_MPLANE |
-				V4L2_CAP_VIDEO_OUTPUT_MPLANE;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
+
 	return 0;
 }
 
@@ -484,10 +467,13 @@ static int vpu_enc_v4l2_ioctl_g_fmt(struct file *file,
 	for (i = 0; i < pix_mp->num_planes; i++)
 		pix_mp->plane_fmt[i].sizeimage = q_data->sizeimage[i];
 
-	if (V4L2_TYPE_IS_OUTPUT(f->type))
-		pix_mp->colorspace = V4L2_COLORSPACE_REC709;
-	else
+	if (!V4L2_TYPE_IS_OUTPUT(f->type))
 		pix_mp->plane_fmt[0].bytesperline = q_data->width;
+
+	pix_mp->colorspace = ctx->colorspace;
+	pix_mp->xfer_func = ctx->xfer_func;
+	pix_mp->ycbcr_enc = ctx->ycbcr_enc;
+	pix_mp->quantization = ctx->quantization;
 
 	return 0;
 }
@@ -653,6 +639,209 @@ static char *cvrt_fourcc_to_str(u32 pixelformat)
 	return str;
 }
 
+static const u8 colorprimaries[] = {
+	0,
+	V4L2_COLORSPACE_REC709,        /*Rec. ITU-R BT.709-6*/
+	0,
+	0,
+	V4L2_COLORSPACE_470_SYSTEM_M, /*Rec. ITU-R BT.470-6 System M*/
+	V4L2_COLORSPACE_470_SYSTEM_BG,/*Rec. ITU-R BT.470-6 System B, G*/
+	V4L2_COLORSPACE_SMPTE170M,    /*SMPTE170M*/
+	V4L2_COLORSPACE_SMPTE240M,    /*SMPTE240M*/
+	V4L2_COLORSPACE_GENERIC_FILM, /*Generic film*/
+	V4L2_COLORSPACE_BT2020,       /*Rec. ITU-R BT.2020-2*/
+	V4L2_COLORSPACE_ST428         /*SMPTE ST 428-1*/
+};
+
+static const u8 colortransfers[] = {
+	0,
+	V4L2_XFER_FUNC_709,      /*Rec. ITU-R BT.709-6*/
+	0,
+	0,
+	V4L2_XFER_FUNC_GAMMA22,  /*Rec. ITU-R BT.470-6 System M*/
+	V4L2_XFER_FUNC_GAMMA28,  /*Rec. ITU-R BT.470-6 System B, G*/
+	V4L2_XFER_FUNC_709,      /*SMPTE170M*/
+	V4L2_XFER_FUNC_SMPTE240M,/*SMPTE240M*/
+	V4L2_XFER_FUNC_LINEAR,   /*Linear transfer characteristics*/
+	0,
+	0,
+	V4L2_XFER_FUNC_XVYCC,    /*IEC 61966-2-4*/
+	V4L2_XFER_FUNC_BT1361,   /*Rec. ITU-R BT.1361-0 extended colour gamut*/
+	V4L2_XFER_FUNC_SRGB,     /*IEC 61966-2-1 sRGB or sYCC*/
+	V4L2_XFER_FUNC_709,      /*Rec. ITU-R BT.2020-2 (10 bit system)*/
+	V4L2_XFER_FUNC_709,      /*Rec. ITU-R BT.2020-2 (12 bit system)*/
+	V4L2_XFER_FUNC_SMPTE2084,/*SMPTE ST 2084*/
+	V4L2_XFER_FUNC_ST428,    /*SMPTE ST 428-1*/
+	V4L2_XFER_FUNC_HLG       /*Rec. ITU-R BT.2100-0 hybrid log-gamma (HLG)*/
+};
+
+static const u8 colormatrixcoefs[] = {
+	0,
+	V4L2_YCBCR_ENC_709,             /*Rec. ITU-R BT.709-6*/
+	0,
+	0,
+	V4L2_YCBCR_ENC_BT470_6M,        /*Title 47 Code of Federal Regulations*/
+	V4L2_YCBCR_ENC_601,             /*Rec. ITU-R BT.601-7 625*/
+	V4L2_YCBCR_ENC_601,             /*Rec. ITU-R BT.601-7 525*/
+	V4L2_YCBCR_ENC_SMPTE240M,       /*SMPTE240M*/
+	0,
+	V4L2_YCBCR_ENC_BT2020,          /*Rec. ITU-R BT.2020-2*/
+	V4L2_YCBCR_ENC_BT2020_CONST_LUM /*Rec. ITU-R BT.2020-2 constant*/
+};
+
+static int vpu_enc_convert_color_v4l2_aspect_to_iso_aspect(struct vpu_ctx *ctx,
+		u32 *primaries, u32 *transfer, u32 *coeffs, u32 *fullrange)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(colorprimaries); i++) {
+		if (colorprimaries[i] == ctx->colorspace) {
+			if (primaries)
+				*primaries = i;
+			break;
+		}
+	}
+
+	for (i = 0; i < ARRAY_SIZE(colortransfers); i++) {
+		if (colortransfers[i] == ctx->xfer_func) {
+			if (transfer)
+				*transfer = i;
+			break;
+		}
+	}
+
+	for (i = 0; i < ARRAY_SIZE(colormatrixcoefs); i++) {
+		if (colormatrixcoefs[i] == ctx->ycbcr_enc) {
+			if (coeffs)
+				*coeffs = i;
+			break;
+		}
+	}
+
+	if (fullrange)
+		*fullrange = ctx->quantization == V4L2_QUANTIZATION_FULL_RANGE;
+
+	return 0;
+}
+
+static bool vpu_enc_check_colorspace(u8 colorspace)
+{
+	int i;
+
+	if (colorspace == V4L2_COLORSPACE_DEFAULT)
+		return FALSE;
+
+	for (i = 0; i < ARRAY_SIZE(colorprimaries); i++) {
+		if (colorprimaries[i] == colorspace)
+			return true;
+	}
+
+	return false;
+}
+
+static bool vpu_enc_check_xfer_func(u8 xfer_func)
+{
+	int i;
+
+	if (xfer_func == V4L2_XFER_FUNC_DEFAULT)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(colortransfers); i++) {
+		if (colortransfers[i] == xfer_func)
+			return true;
+	}
+
+	return false;
+}
+
+static bool vpu_enc_check_ycbcr_enc(u8 ycbcr_enc)
+{
+	int i;
+
+	if (ycbcr_enc == V4L2_YCBCR_ENC_DEFAULT)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(colormatrixcoefs); i++) {
+		if (ycbcr_enc == colormatrixcoefs[i])
+			return true;
+	}
+
+	return false;
+}
+
+static bool vpu_enc_check_quantization(u8 quantization)
+{
+	bool support = false;
+
+	switch (quantization) {
+	case V4L2_QUANTIZATION_FULL_RANGE:
+	case V4L2_QUANTIZATION_LIM_RANGE:
+		support = true;
+		break;
+	default:
+		break;
+	}
+
+	return support;
+}
+
+static int vpu_enc_set_default_color(struct vpu_ctx *ctx, u8 colorspace)
+{
+	ctx->colorspace = colorspace;
+
+	switch (colorspace) {
+	case V4L2_COLORSPACE_REC709:
+		ctx->xfer_func = V4L2_XFER_FUNC_709;
+		ctx->ycbcr_enc = V4L2_YCBCR_ENC_709;
+		ctx->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+		break;
+	case V4L2_COLORSPACE_470_SYSTEM_M:
+	case V4L2_COLORSPACE_470_SYSTEM_BG:
+	case V4L2_COLORSPACE_SMPTE170M:
+		ctx->xfer_func = V4L2_XFER_FUNC_709;
+		ctx->ycbcr_enc = V4L2_YCBCR_ENC_601;
+		ctx->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+		break;
+	case V4L2_COLORSPACE_SMPTE240M:
+		ctx->xfer_func = V4L2_XFER_FUNC_SMPTE240M;
+		ctx->ycbcr_enc = V4L2_YCBCR_ENC_SMPTE240M;
+		ctx->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+		break;
+	case V4L2_COLORSPACE_BT2020:
+		ctx->xfer_func = V4L2_XFER_FUNC_709;
+		ctx->ycbcr_enc = V4L2_YCBCR_ENC_BT2020;
+		ctx->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+		break;
+	default:
+		ctx->xfer_func = V4L2_XFER_FUNC_709;
+		ctx->ycbcr_enc = V4L2_YCBCR_ENC_709;
+		ctx->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+		break;
+	}
+
+	return 0;
+}
+
+static int vpu_enc_set_color(struct vpu_ctx *ctx, struct v4l2_format *f)
+{
+	struct v4l2_pix_format_mplane *pix_mp;
+
+	if (!ctx || !f)
+		return -EINVAL;
+
+	pix_mp = &f->fmt.pix_mp;
+	if (vpu_enc_check_colorspace(pix_mp->colorspace))
+		vpu_enc_set_default_color(ctx, pix_mp->colorspace);
+	if (vpu_enc_check_xfer_func(pix_mp->xfer_func))
+		ctx->xfer_func = pix_mp->xfer_func;
+	if (vpu_enc_check_ycbcr_enc(pix_mp->ycbcr_enc))
+		ctx->ycbcr_enc = pix_mp->ycbcr_enc;
+	if (vpu_enc_check_quantization(pix_mp->quantization))
+		ctx->quantization = pix_mp->quantization;
+
+	return 0;
+}
+
 static int set_yuv_queue_fmt(struct queue_data *q_data, struct v4l2_format *f)
 {
 	struct vpu_v4l2_fmt *fmt = NULL;
@@ -683,6 +872,8 @@ static int set_yuv_queue_fmt(struct queue_data *q_data, struct v4l2_format *f)
 		pix_mp->plane_fmt[i].sizeimage = q_data->sizeimage[i];
 
 	q_data->current_fmt = fmt;
+
+	vpu_enc_set_color(q_data->ctx, f);
 
 	return 0;
 }
@@ -755,6 +946,11 @@ static int vpu_enc_v4l2_ioctl_s_fmt(struct file *file,
 	else
 		ret = set_enc_queue_fmt(q_data, f);
 	mutex_unlock(&ctx->instance_mutex);
+
+	f->fmt.pix_mp.colorspace = ctx->colorspace;
+	f->fmt.pix_mp.xfer_func = ctx->xfer_func;
+	f->fmt.pix_mp.ycbcr_enc = ctx->ycbcr_enc;
+	f->fmt.pix_mp.quantization = ctx->quantization;
 
 	vpu_dbg(LVL_FLOW, "[%d:%d] %s set fmt, %c%c%c%c %dx%d\n",
 			ctx->core_dev->id,
@@ -1315,7 +1511,26 @@ static int vpu_enc_v4l2_ioctl_try_fmt(struct file *file,
 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		pix_mp->field = V4L2_FIELD_ANY;
 		pix_mp->colorspace = V4L2_COLORSPACE_REC709;
+		if (!vpu_enc_check_colorspace(pix_mp->colorspace)) {
+			pix_mp->colorspace = ctx->colorspace;
+			pix_mp->xfer_func = ctx->xfer_func;
+			pix_mp->ycbcr_enc = ctx->ycbcr_enc;
+			pix_mp->quantization = ctx->quantization;
+		} else {
+			if (!vpu_enc_check_xfer_func(pix_mp->xfer_func))
+				pix_mp->xfer_func = ctx->xfer_func;
+			if (!vpu_enc_check_ycbcr_enc(pix_mp->ycbcr_enc))
+				pix_mp->ycbcr_enc = ctx->ycbcr_enc;
+			if (!vpu_enc_check_quantization(pix_mp->quantization))
+				pix_mp->quantization = ctx->quantization;
+		}
+	} else {
+		pix_mp->colorspace = ctx->colorspace;
+		pix_mp->xfer_func = ctx->xfer_func;
+		pix_mp->ycbcr_enc = ctx->ycbcr_enc;
+		pix_mp->quantization = ctx->quantization;
 	}
+
 	if (!format_is_support(q_data->supported_fmts, q_data->fmt_count, f))
 		return -EINVAL;
 
@@ -1821,48 +2036,20 @@ static void update_encode_size(struct vpu_ctx *ctx)
 
 static void init_ctx_seq_info(struct vpu_ctx *ctx)
 {
-	int i;
-
 	if (!ctx)
 		return;
 
 	ctx->sequence = 0;
-	for (i = 0; i < ARRAY_SIZE(ctx->timestams); i++)
-		ctx->timestams[i] = VPU_ENC_INVALID_TIMESTAMP;
 	ctx->timestamp = VPU_ENC_INVALID_TIMESTAMP;
 }
 
 static void fill_ctx_seq(struct vpu_ctx *ctx, struct vb2_data_req *p_data_req)
 {
-	u_int32 idx;
-
 	WARN_ON(!ctx || !p_data_req);
 
 	p_data_req->sequence = ctx->sequence++;
-	idx = p_data_req->sequence % VPU_ENC_SEQ_CAPACITY;
-	if (ctx->timestams[idx] != VPU_ENC_INVALID_TIMESTAMP) {
-		count_timestamp_overwrite(ctx);
-		vpu_dbg(LVL_FRAME, "[%d:%d][%d] overwrite timestamp\n",
-			ctx->core_dev->id, ctx->str_index,
-			p_data_req->sequence);
-	}
-	ctx->timestams[idx] = p_data_req->vb2_buf->timestamp;
 	if (ctx->timestamp < (s64)p_data_req->vb2_buf->timestamp)
 		ctx->timestamp = p_data_req->vb2_buf->timestamp;
-}
-
-static s64 get_ctx_seq_timestamp(struct vpu_ctx *ctx, u32 sequence)
-{
-	s64 timestamp;
-	u_int32 idx;
-
-	WARN_ON(!ctx);
-
-	idx = sequence % VPU_ENC_SEQ_CAPACITY;
-	timestamp = ctx->timestams[idx];
-	ctx->timestams[idx] = VPU_ENC_INVALID_TIMESTAMP;
-
-	return timestamp;
 }
 
 static void fill_vb_sequence(struct vb2_buffer *vb, u32 sequence)
@@ -1948,6 +2135,8 @@ static int do_configure_codec(struct vpu_ctx *ctx)
 	show_firmware_version(ctx->core_dev, LVL_INFO);
 	clear_stop_status(ctx);
 	memcpy(enc_param, &attr->param, sizeof(attr->param));
+	if (!enc_param->uGopBLength)
+		enc_param->uLowLatencyMode = 1;
 	vpu_ctx_send_cmd(ctx, GTB_ENC_CMD_CONFIGURE_CODEC, 0, NULL);
 
 	show_codec_configure(enc_param, pEncExpertModeParam);
@@ -2057,7 +2246,37 @@ static void record_start_time(struct vpu_ctx *ctx, enum QUEUE_TYPE type)
 				ts.tv_nsec / NSEC_PER_MSEC;
 }
 
-static bool update_yuv_addr(struct vpu_ctx *ctx)
+static int update_encode_param(struct vpu_ctx *ctx)
+{
+	struct vpu_attr *attr;
+	pMEDIAIP_ENC_PARAM enc_param;
+	pMEDIAIP_ENC_EXPERT_MODE_PARAM expert;
+	bool change = false;
+
+	attr = get_vpu_ctx_attr(ctx);
+	enc_param = get_rpc_enc_param(ctx);
+	expert = get_rpc_expert_mode_param(ctx);
+
+	if (enc_param->eBitRateMode == MEDIAIP_ENC_BITRATECONTROLMODE_CBR &&
+	    attr->param.eBitRateMode == enc_param->eBitRateMode &&
+	    attr->param.uTargetBitrate != enc_param->uTargetBitrate) {
+		vpu_dbg(LVL_CTRL, "[%d] bitrate %d -> %d (kbps)\n",
+				ctx->str_index,
+				enc_param->uTargetBitrate,
+				attr->param.uTargetBitrate);
+		expert->Static.rate_control_bitrate =
+			enc_param->uTargetBitrate = attr->param.uTargetBitrate;
+		change = true;
+	}
+
+	if (!change)
+		return 0;
+
+	vpu_ctx_send_cmd(ctx, GTB_ENC_CMD_PARAMETER_UPD, 0, NULL);
+	return 0;
+}
+
+static bool update_yuv_addr(struct vpu_ctx *ctx, s64 *timestamp)
 {
 	bool bGotAFrame = FALSE;
 
@@ -2081,6 +2300,7 @@ static bool update_yuv_addr(struct vpu_ctx *ctx)
 	if (desc->uLumaBase != 0)
 		bGotAFrame = TRUE;
 
+	update_encode_param(ctx);
 	/*
 	 * keeps increasing,
 	 * so just a frame input count rather than a Frame buffer ID
@@ -2091,6 +2311,8 @@ static bool update_yuv_addr(struct vpu_ctx *ctx)
 	else
 		desc->uKeyFrame = 0;
 	list_del(&p_data_req->list);
+	if (timestamp)
+		*timestamp = p_data_req->vb2_buf->timestamp;
 
 	return bGotAFrame;
 }
@@ -2251,6 +2473,7 @@ bool check_stream_buffer_for_coded_picture(struct vpu_ctx *ctx)
 static int submit_input_and_encode(struct vpu_ctx *ctx)
 {
 	struct queue_data *queue;
+	s64 timestamp = -1;
 
 	if (!ctx)
 		return -EINVAL;
@@ -2273,8 +2496,17 @@ static int submit_input_and_encode(struct vpu_ctx *ctx)
 	if (!test_bit(VPU_ENC_STATUS_START_DONE, &ctx->status))
 		goto exit;
 
-	if (update_yuv_addr(ctx)) {
-		vpu_ctx_send_cmd(ctx, GTB_ENC_CMD_FRAME_ENCODE, 0, NULL);
+	if (update_yuv_addr(ctx, &timestamp)) {
+		u32 data[2];
+
+		if (timestamp < 0) {
+			data[0] = -1;
+			data[1] = 0;
+		} else {
+			data[0] = timestamp / NSEC_PER_SEC;
+			data[1] = timestamp % NSEC_PER_SEC;
+		}
+		vpu_ctx_send_cmd(ctx, GTB_ENC_CMD_FRAME_ENCODE, 2, data);
 		clear_queue_rw_flag(queue, VPU_ENC_FLAG_WRITEABLE);
 		record_start_time(ctx, V4L2_SRC);
 	}
@@ -2541,7 +2773,7 @@ static int precheck_frame(struct vpu_ctx *ctx, struct vpu_frame_info *frame)
 		return -EINVAL;
 	}
 
-	bytesskiped = find_frame_start_and_skip(ctx, frame, 0);
+	bytesskiped = find_frame_start_and_skip(ctx, frame, 1);
 	if (!bytesskiped)
 		return 0;
 
@@ -2671,7 +2903,7 @@ static bool process_frame_done(struct queue_data *queue)
 	fill_vb_sequence(p_data_req->vb2_buf, frame->info.uFrameID);
 	set_vb_flags(p_data_req->vb2_buf, p_data_req->buffer_flags);
 	p_data_req->vb2_buf->timestamp = frame->timestamp;
-	vpu_dbg(LVL_FRAME, "[%d:%d] index : %8d, length : %8ld, ts : %lld%s\n",
+	vpu_dbg(LVL_FRAME, "[%d:%d][%8d], length : %8ld, ts : %32lld%s\n",
 			ctx->core_dev->id, ctx->str_index,
 			frame->info.uFrameID,
 			vb2_get_plane_payload(p_data_req->vb2_buf, 0),
@@ -2797,6 +3029,23 @@ static void vpu_enc_config_expert_mode_parm(struct vpu_ctx *ctx)
 		attr->h264_vui_sar_idc,
 		attr->h264_vui_sar_width,
 		attr->h264_vui_sar_height);
+
+	param->Config.h264_video_type_present = 1;
+	param->Config.h264_video_format = 5;
+	param->Config.h264_video_colour_descriptor = 1;
+	vpu_enc_convert_color_v4l2_aspect_to_iso_aspect(ctx,
+			&param->Config.h264_video_colour_primaries,
+			&param->Config.h264_video_transfer_char,
+			&param->Config.h264_video_matrix_coeff,
+			&param->Config.h264_video_full_range);
+
+	vpu_dbg(LVL_FLOW,
+		"[%d:%d] primaries=%d, transfer=%d, matrix=%d, fullrange =%d\n",
+		ctx->core_dev->id, ctx->str_index,
+		param->Config.h264_video_colour_primaries,
+		param->Config.h264_video_transfer_char,
+		param->Config.h264_video_matrix_coeff,
+		param->Config.h264_video_full_range);
 }
 
 static int handle_event_mem_request(struct vpu_ctx *ctx,
@@ -2877,7 +3126,7 @@ static int handle_event_frame_done(struct vpu_ctx *ctx,
 	show_enc_pic_info(pEncPicInfo);
 	record_start_time(ctx, V4L2_DST);
 
-	timestamp = get_ctx_seq_timestamp(ctx, pEncPicInfo->uFrameID);
+	timestamp = (pEncPicInfo->tv_s * NSEC_PER_SEC + pEncPicInfo->tv_ns);
 
 	down(&queue->drv_q_lock);
 	frame = get_idle_frame(queue);
@@ -3213,21 +3462,6 @@ static void vpu_enc_fw_init(struct core_device *core_dev)
 	u32 mu_addr;
 
 	vpu_dbg(LVL_ALL, "enable mu for core[%d]\n", core_dev->id);
-
-	rpc_init_shared_memory_encoder(&core_dev->shared_mem,
-				cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy),
-				core_dev->m0_rpc_virt, core_dev->rpc_buf_size,
-				&core_dev->rpc_actual_size);
-	rpc_set_system_cfg_value_encoder(core_dev->shared_mem.pSharedInterface,
-				core_dev->vdev->reg_rpc_system, core_dev->id);
-
-	if (core_dev->rpc_actual_size > core_dev->rpc_buf_size)
-		vpu_err("rpc actual size(0x%x) > (0x%x), may occur overlay\n",
-			core_dev->rpc_actual_size, core_dev->rpc_buf_size);
-
-	mu_addr = cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy + core_dev->rpc_buf_size);
-	rpc_set_print_buffer(&core_dev->shared_mem, mu_addr, core_dev->print_buf_size);
-	core_dev->print_buf = core_dev->m0_rpc_virt + core_dev->rpc_buf_size;
 
 	mu_addr = cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy);
 	vpu_enc_mu_send_msg(core_dev, RPC_BUF_OFFSET, mu_addr);
@@ -3877,6 +4111,7 @@ static int init_vpu_ctx(struct vpu_ctx *ctx)
 	init_ctx_msg_queue(ctx);
 
 	vpu_enc_init_queue_data(ctx);
+	vpu_enc_set_default_color(ctx, V4L2_COLORSPACE_REC709);
 	init_completion(&ctx->start_cmp);
 	init_completion(&ctx->stop_cmp);
 
@@ -4087,8 +4322,6 @@ static int show_frame_sts(struct vpu_statistic *statistic, char *buf, u32 size)
 	num += show_fps_info(statistic->fps, ARRAY_SIZE(statistic->fps),
 				buf + num, PAGE_SIZE - num);
 	num += scnprintf(buf + num, size - num, "\n");
-	num += scnprintf(buf + num, size - num, "\t%-24s:%ld\n",
-			"timestamp overwrite", statistic->timestamp_overwrite);
 
 	return num;
 }
@@ -4448,10 +4681,10 @@ static ssize_t show_memory_info(struct device *dev,
 		num += scnprintf(buf + num, PAGE_SIZE - num, "core[%d]\n", i);
 
 		for (j = 0; j < ARRAY_SIZE(core->attr); j++) {
-			struct vpu_attr *attr = &core->attr[j];
+			struct vpu_attr *attr_loc = &core->attr[j];
 			unsigned long size;
 
-			size = atomic64_read(&attr->total_dma_size);
+			size = atomic64_read(&attr_loc->total_dma_size);
 			total_dma_size += size;
 			num += scnprintf(buf + num, PAGE_SIZE - num,
 					"\t[%d] : %ld\n", j, size);
@@ -4916,17 +5149,11 @@ static void vpu_enc_setup(struct vpu_dev *This)
 	vpu_dbg(LVL_IRQ, "%s read_data=%x\n", __func__, read_data);
 }
 
-static void vpu_enc_reset(struct vpu_dev *This)
-{
-	const off_t offset = SCB_XREG_SLV_BASE + SCB_SCB_BLK_CTRL;
-
-	vpu_log_func();
-	write_vpu_reg(This, 0x7, offset + SCB_BLK_CTRL_CACHE_RESET_CLR);
-}
-
 static int vpu_enc_enable_hw(struct vpu_dev *This)
 {
 	vpu_log_func();
+	if (This->hw_enable)
+		return 0;
 	vpu_enc_setup(This);
 
 	This->hw_enable = true;
@@ -4937,7 +5164,6 @@ static int vpu_enc_enable_hw(struct vpu_dev *This)
 static void vpu_enc_disable_hw(struct vpu_dev *This)
 {
 	This->hw_enable = false;
-	vpu_enc_reset(This);
 	if (This->regs_base) {
 		iounmap(This->regs_base);
 		This->regs_base = NULL;
@@ -5031,7 +5257,7 @@ static int parse_dt_cores(struct vpu_dev *dev, struct device_node *np)
 	dev->core_num = 0;
 	for (i = 0; i < VPU_ENC_MAX_CORE_NUM; i++) {
 		scnprintf(core_name, sizeof(core_name), "core%d", i);
-		node = of_find_node_by_name(np, core_name);
+		node = of_find_node_by_name(of_node_get(np), core_name);
 		if (!node) {
 			vpu_dbg(LVL_INFO, "can't find %s\n", core_name);
 			break;
@@ -5175,9 +5401,7 @@ static int create_vpu_video_device(struct vpu_dev *dev)
 	dev->pvpu_encoder_dev->vfl_dir = vpu_enc_v4l2_videodevice.vfl_dir;
 	dev->pvpu_encoder_dev->v4l2_dev = &dev->v4l2_dev;
 	dev->pvpu_encoder_dev->device_caps = V4L2_CAP_VIDEO_M2M_MPLANE |
-					     V4L2_CAP_STREAMING |
-					     V4L2_CAP_VIDEO_CAPTURE_MPLANE |
-					     V4L2_CAP_VIDEO_OUTPUT_MPLANE;
+					     V4L2_CAP_STREAMING;
 
 	video_set_drvdata(dev->pvpu_encoder_dev, dev);
 
@@ -5518,6 +5742,41 @@ static void vpu_enc_remove_debugfs_file(struct vpu_dev *dev)
 	dev->debugfs_root = NULL;
 }
 
+static void vpu_enc_init_core_rpc(struct core_device *core_dev)
+{
+	u32 mu_addr;
+
+	cleanup_firmware_memory(core_dev);
+	memset_io(core_dev->m0_rpc_virt, 0, core_dev->rpc_buf_size);
+
+	rpc_init_shared_memory_encoder(&core_dev->shared_mem,
+				cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy),
+				core_dev->m0_rpc_virt, core_dev->rpc_buf_size,
+				&core_dev->rpc_actual_size);
+	rpc_set_system_cfg_value_encoder(core_dev->shared_mem.pSharedInterface,
+				core_dev->vdev->reg_rpc_system, core_dev->id);
+
+	if (core_dev->rpc_actual_size > core_dev->rpc_buf_size)
+		vpu_err("rpc actual size(0x%x) > (0x%x), may occur overlay\n",
+			core_dev->rpc_actual_size, core_dev->rpc_buf_size);
+
+	mu_addr = cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy + core_dev->rpc_buf_size);
+	rpc_set_print_buffer(&core_dev->shared_mem, mu_addr, core_dev->print_buf_size);
+	core_dev->print_buf = core_dev->m0_rpc_virt + core_dev->rpc_buf_size;
+
+	reset_vpu_core_dev(core_dev);
+}
+
+static void vpu_enc_restore_core_rpc(struct core_device *core_dev)
+{
+	rpc_restore_shared_memory_encoder(&core_dev->shared_mem,
+				cpu_phy_to_mu(core_dev, core_dev->m0_rpc_phy),
+				core_dev->m0_rpc_virt);
+	core_dev->print_buf = core_dev->m0_rpc_virt + core_dev->rpc_buf_size;
+	sw_reset_firmware(core_dev, 0);
+	set_core_fw_status(core_dev, true);
+}
+
 static int init_vpu_core_dev(struct core_device *core_dev)
 {
 	int ret = 0;
@@ -5556,8 +5815,6 @@ static int init_vpu_core_dev(struct core_device *core_dev)
 		goto err_free_fifo;
 	}
 
-	cleanup_firmware_memory(core_dev);
-
 	core_dev->m0_rpc_virt =
 		ioremap_wc(core_dev->m0_rpc_phy,
 			core_dev->rpc_buf_size + core_dev->print_buf_size);
@@ -5567,9 +5824,10 @@ static int init_vpu_core_dev(struct core_device *core_dev)
 		goto err_free_fifo;
 	}
 
-	memset_io(core_dev->m0_rpc_virt, 0, core_dev->rpc_buf_size);
-
-	reset_vpu_core_dev(core_dev);
+	if (is_vpu_enc_poweroff(core_dev))
+		vpu_enc_init_core_rpc(core_dev);
+	else
+		vpu_enc_restore_core_rpc(core_dev);
 
 	init_vpu_attrs(core_dev);
 
@@ -5707,30 +5965,25 @@ static int vpu_enc_probe(struct platform_device *pdev)
 		goto error_iounmap;
 	}
 
-	ret = v4l2_device_register(&pdev->dev, &dev->v4l2_dev);
-	if (ret) {
-		vpu_err("%s unable to register v4l2 dev\n", __func__);
-		goto error_reserved_mem;
-	}
-
 	platform_set_drvdata(pdev, dev);
-
-	ret = create_vpu_video_device(dev);
-	if (ret) {
-		vpu_err("create vpu video device fail\n");
-		goto error_unreg_v4l2;
-	}
-
-	pm_runtime_enable(&pdev->dev);
-	pm_runtime_get_sync(&pdev->dev);
-
-	vpu_enc_enable_hw(dev);
-
 	mutex_init(&dev->dev_mutex);
 	for (i = 0; i < dev->core_num; i++) {
 		dev->core_dev[i].id = i;
 		dev->core_dev[i].generic_dev = get_device(dev->generic_dev);
 		dev->core_dev[i].vdev = dev;
+	}
+
+	pm_runtime_enable(&pdev->dev);
+	ret = pm_runtime_get_sync(&pdev->dev);
+	if (ret < 0) {
+		vpu_err("fail to request mailbox, ret = %d\n", ret);
+		pm_runtime_put_noidle(&pdev->dev);
+		pm_runtime_set_suspended(&pdev->dev);
+		goto error_pm_runtime_get_sync;
+	}
+
+	mutex_init(&dev->dev_mutex);
+	for (i = 0; i < dev->core_num; i++) {
 		ret = init_vpu_core_dev(&dev->core_dev[i]);
 		if (ret)
 			break;
@@ -5744,8 +5997,22 @@ static int vpu_enc_probe(struct platform_device *pdev)
 	}
 
 	dev->core_num = i;
+	vpu_enc_enable_hw(dev);
 
 	pm_runtime_put_sync(&pdev->dev);
+
+	ret = v4l2_device_register(&pdev->dev, &dev->v4l2_dev);
+	if (ret) {
+		vpu_err("%s unable to register v4l2 dev\n", __func__);
+		goto error_init_core;
+	}
+
+	ret = create_vpu_video_device(dev);
+	if (ret) {
+		vpu_err("create vpu video device fail\n");
+		goto error_unreg_v4l2;
+	}
+
 
 	device_create_file(&pdev->dev, &dev_attr_meminfo);
 	device_create_file(&pdev->dev, &dev_attr_buffer);
@@ -5757,21 +6024,21 @@ static int vpu_enc_probe(struct platform_device *pdev)
 
 	return 0;
 
+error_unreg_v4l2:
+	v4l2_device_unregister(&dev->v4l2_dev);
 error_init_core:
 	for (i = 0; i < dev->core_num; i++)
 		uninit_vpu_core_dev(&dev->core_dev[i]);
 
 	vpu_enc_disable_hw(dev);
 	pm_runtime_put_sync(&pdev->dev);
+error_pm_runtime_get_sync:
 	pm_runtime_disable(&pdev->dev);
 
 	if (dev->pvpu_encoder_dev) {
 		video_unregister_device(dev->pvpu_encoder_dev);
 		dev->pvpu_encoder_dev = NULL;
 	}
-error_unreg_v4l2:
-	v4l2_device_unregister(&dev->v4l2_dev);
-error_reserved_mem:
 	vpu_enc_release_reserved_memory(&dev->reserved_mem);
 error_iounmap:
 	if (dev->regs_base) {
@@ -5785,7 +6052,6 @@ error_put_dev:
 		put_device(dev->generic_dev);
 		dev->generic_dev = NULL;
 	}
-	devm_kfree(&pdev->dev, dev);
 
 	return ret;
 }
@@ -5824,8 +6090,6 @@ static int vpu_enc_remove(struct platform_device *pdev)
 		put_device(dev->generic_dev);
 		dev->generic_dev = NULL;
 	}
-
-	devm_kfree(&pdev->dev, dev);
 
 	return 0;
 }

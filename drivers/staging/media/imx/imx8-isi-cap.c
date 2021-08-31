@@ -311,6 +311,7 @@ void mxc_isi_cap_frame_write_done(struct mxc_isi_dev *mxc_isi)
 	vb2->state = VB2_BUF_STATE_ACTIVE;
 	list_move_tail(isi_cap->out_pending.next, &isi_cap->out_active);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_cap_frame_write_done);
 
 static int cap_vb2_queue_setup(struct vb2_queue *q,
 			       unsigned int *num_buffers,
@@ -418,7 +419,7 @@ static int cap_vb2_start_streaming(struct vb2_queue *q, unsigned int count)
 		if (!isi_cap->discard_buffer[i]) {
 			for (j = 0; j < i; j++) {
 				dma_free_coherent(&isi_cap->pdev->dev,
-						  isi_cap->discard_size[j],
+						  PAGE_ALIGN(isi_cap->discard_size[j]),
 						  isi_cap->discard_buffer[j],
 						  isi_cap->discard_buffer_dma[j]);
 				dev_err(&isi_cap->pdev->dev,
@@ -429,7 +430,7 @@ static int cap_vb2_start_streaming(struct vb2_queue *q, unsigned int count)
 		dev_dbg(&isi_cap->pdev->dev,
 			"%s: num_plane=%d discard_size=%d discard_buffer=%p\n"
 			, __func__, i,
-			(int)isi_cap->discard_size[i],
+			PAGE_ALIGN((int)isi_cap->discard_size[i]),
 			isi_cap->discard_buffer[i]);
 	}
 
@@ -469,7 +470,7 @@ static void cap_vb2_stop_streaming(struct vb2_queue *q)
 {
 	struct mxc_isi_cap_dev *isi_cap = vb2_get_drv_priv(q);
 	struct mxc_isi_dev *mxc_isi = mxc_isi_get_hostdata(isi_cap->pdev);
-	struct mxc_isi_buffer *buf, *tmp;
+	struct mxc_isi_buffer *buf;
 	unsigned long flags;
 	int i;
 
@@ -482,7 +483,7 @@ static void cap_vb2_stop_streaming(struct vb2_queue *q)
 	while (!list_empty(&isi_cap->out_active)) {
 		buf = list_entry(isi_cap->out_active.next,
 				 struct mxc_isi_buffer, list);
-		list_del(&buf->list);
+		list_del_init(&buf->list);
 		if (buf->discard)
 			continue;
 
@@ -492,24 +493,14 @@ static void cap_vb2_stop_streaming(struct vb2_queue *q)
 	while (!list_empty(&isi_cap->out_pending)) {
 		buf = list_entry(isi_cap->out_pending.next,
 				 struct mxc_isi_buffer, list);
-		list_del(&buf->list);
+		list_del_init(&buf->list);
 		vb2_buffer_done(&buf->v4l2_buf.vb2_buf, VB2_BUF_STATE_ERROR);
 	}
 
 	while (!list_empty(&isi_cap->out_discard)) {
 		buf = list_entry(isi_cap->out_discard.next,
 				 struct mxc_isi_buffer, list);
-		list_del(&buf->list);
-	}
-
-	list_for_each_entry_safe(buf, tmp, &isi_cap->out_active, list) {
-		list_del(&buf->list);
-		vb2_buffer_done(&buf->v4l2_buf.vb2_buf, VB2_BUF_STATE_ERROR);
-	}
-
-	list_for_each_entry_safe(buf, tmp, &isi_cap->out_pending, list) {
-		list_del(&buf->list);
-		vb2_buffer_done(&buf->v4l2_buf.vb2_buf, VB2_BUF_STATE_ERROR);
+		list_del_init(&buf->list);
 	}
 
 	INIT_LIST_HEAD(&isi_cap->out_active);
@@ -520,7 +511,7 @@ static void cap_vb2_stop_streaming(struct vb2_queue *q)
 
 	for (i = 0; i < isi_cap->pix.num_planes; i++)
 		dma_free_coherent(&isi_cap->pdev->dev,
-				  isi_cap->discard_size[i],
+				  PAGE_ALIGN(isi_cap->discard_size[i]),
 				  isi_cap->discard_buffer[i],
 				  isi_cap->discard_buffer_dma[i]);
 }
@@ -626,9 +617,8 @@ void mxc_isi_ctrls_delete(struct mxc_isi_cap_dev *isi_cap)
 }
 
 static struct media_pad
-*mxc_isi_get_remote_source_pad(struct mxc_isi_cap_dev *isi_cap)
+*mxc_isi_get_remote_source_pad(struct v4l2_subdev *subdev)
 {
-	struct v4l2_subdev *subdev = &isi_cap->sd;
 	struct media_pad *sink_pad, *source_pad;
 	int i;
 
@@ -653,28 +643,46 @@ static struct media_pad
 	return NULL;
 }
 
-static struct v4l2_subdev *mxc_get_remote_subdev(struct mxc_isi_cap_dev *isi_cap,
+static struct v4l2_subdev *mxc_get_remote_subdev(struct v4l2_subdev *subdev,
 						 const char * const label)
 {
 	struct media_pad *source_pad;
 	struct v4l2_subdev *sen_sd;
 
 	/* Get remote source pad */
-	source_pad = mxc_isi_get_remote_source_pad(isi_cap);
+	source_pad = mxc_isi_get_remote_source_pad(subdev);
 	if (!source_pad) {
-		v4l2_err(&isi_cap->sd,
-			 "%s, No remote pad found!\n", label);
+		v4l2_err(subdev, "%s, No remote pad found!\n", label);
 		return NULL;
 	}
 
 	/* Get remote source pad subdev */
 	sen_sd = media_entity_to_v4l2_subdev(source_pad->entity);
 	if (!sen_sd) {
-		v4l2_err(&isi_cap->sd, "%s, No remote subdev found!\n", label);
+		v4l2_err(subdev, "%s, No remote subdev found!\n", label);
 		return NULL;
 	}
 
 	return sen_sd;
+}
+
+static bool is_entity_link_setup(struct mxc_isi_cap_dev *isi_cap)
+{
+	struct video_device *vdev = &isi_cap->vdev;
+	struct v4l2_subdev *csi_sd, *sen_sd;
+
+	if (!vdev->entity.num_links || !isi_cap->sd.entity.num_links)
+		return false;
+
+	csi_sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
+	if (!csi_sd || !csi_sd->entity.num_links)
+		return false;
+
+	sen_sd = mxc_get_remote_subdev(csi_sd, __func__);
+	if (!sen_sd || !sen_sd->entity.num_links)
+		return false;
+
+	return true;
 }
 
 static int mxc_isi_capture_open(struct file *file)
@@ -685,12 +693,20 @@ static int mxc_isi_capture_open(struct file *file)
 	struct v4l2_subdev *sd;
 	int ret = -EBUSY;
 
+	mutex_lock(&isi_cap->lock);
+	isi_cap->is_link_setup = is_entity_link_setup(isi_cap);
+	if (!isi_cap->is_link_setup) {
+		mutex_unlock(&isi_cap->lock);
+		return 0;
+	}
+	mutex_unlock(&isi_cap->lock);
+
 	if (mxc_isi->m2m_enabled) {
 		dev_err(dev, "ISI channel[%d] is busy\n", isi_cap->id);
 		return ret;
 	}
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd)
 		return -ENODEV;
 
@@ -728,7 +744,10 @@ static int mxc_isi_capture_release(struct file *file)
 	struct v4l2_subdev *sd;
 	int ret = -1;
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	if (!isi_cap->is_link_setup)
+		return 0;
+
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd)
 		goto label;
 
@@ -871,14 +890,14 @@ static int mxc_isi_source_fmt_init(struct mxc_isi_cap_dev *isi_cap)
 	struct v4l2_subdev *src_sd;
 	int ret;
 
-	source_pad = mxc_isi_get_remote_source_pad(isi_cap);
+	source_pad = mxc_isi_get_remote_source_pad(&isi_cap->sd);
 	if (!source_pad) {
 		v4l2_err(&isi_cap->sd,
 			 "%s, No remote pad found!\n", __func__);
 		return -EINVAL;
 	}
 
-	src_sd = mxc_get_remote_subdev(isi_cap, __func__);
+	src_sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!src_sd)
 		return -EINVAL;
 
@@ -1019,7 +1038,7 @@ static int mxc_isi_cap_g_parm(struct file *file, void *fh,
 	struct mxc_isi_cap_dev *isi_cap = video_drvdata(file);
 	struct v4l2_subdev *sd;
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd)
 		return -ENODEV;
 
@@ -1032,7 +1051,7 @@ static int mxc_isi_cap_s_parm(struct file *file, void *fh,
 	struct mxc_isi_cap_dev *isi_cap = video_drvdata(file);
 	struct v4l2_subdev *sd;
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd)
 		return -ENODEV;
 
@@ -1188,7 +1207,7 @@ static int mxc_isi_cap_enum_framesizes(struct file *file, void *priv,
 		return -EINVAL;
 	fse.code = fmt->mbus_code;
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd) {
 		v4l2_err(&isi_cap->sd, "Can't find subdev\n");
 		return -ENODEV;
@@ -1199,8 +1218,9 @@ static int mxc_isi_cap_enum_framesizes(struct file *file, void *priv,
 		return ret;
 
 	parent = of_get_parent(isi_cap->pdev->dev.of_node);
-	if ((of_device_is_compatible(parent, "fsl,imx8mn-isi")) &&
-	    (fse.max_width > ISI_2K || fse.min_width > ISI_2K))
+	if ((of_device_is_compatible(parent, "fsl,imx8mp-isi")) &&
+	    (fse.max_width > ISI_2K || fse.min_width > ISI_2K) &&
+	    (isi_cap->id == 1))
 		return -EINVAL;
 
 	if (fse.min_width == fse.max_width &&
@@ -1242,7 +1262,7 @@ static int mxc_isi_cap_enum_frameintervals(struct file *file, void *fh,
 		return -EINVAL;
 	fie.code = fmt->mbus_code;
 
-	sd = mxc_get_remote_subdev(isi_cap, __func__);
+	sd = mxc_get_remote_subdev(&isi_cap->sd, __func__);
 	if (!sd)
 		return -EINVAL;
 
@@ -1251,8 +1271,8 @@ static int mxc_isi_cap_enum_frameintervals(struct file *file, void *fh,
 		return ret;
 
 	parent = of_get_parent(isi_cap->pdev->dev.of_node);
-	if (of_device_is_compatible(parent, "fsl,imx8mn-isi") &&
-	    fie.width > ISI_2K)
+	if (of_device_is_compatible(parent, "fsl,imx8mp-isi") &&
+	    fie.width > ISI_2K && isi_cap->id == 1)
 		return -EINVAL;
 
 	interval->type = V4L2_FRMIVAL_TYPE_DISCRETE;
@@ -1701,7 +1721,6 @@ static int isi_cap_probe(struct platform_device *pdev)
 
 	sd = &isi_cap->sd;
 	v4l2_subdev_init(sd, &mxc_isi_subdev_ops);
-	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	snprintf(sd->name, sizeof(sd->name), "mxc_isi.%d", isi_cap->id);
 
 	sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_PIXEL_FORMATTER;

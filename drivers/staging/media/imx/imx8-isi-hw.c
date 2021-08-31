@@ -5,8 +5,14 @@
  */
 #include <dt-bindings/pinctrl/pads-imx8qxp.h>
 
+#include <linux/module.h>
 #include "imx8-isi-hw.h"
 #include "imx8-common.h"
+
+MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+MODULE_DESCRIPTION("IMX8 Image Sensor Interface Hardware driver");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0");
 
 #define	ISI_DOWNSCALE_THRESHOLD		0x4000
 
@@ -106,7 +112,7 @@ static bool is_rgb(u32 pix_fmt)
 	    (pix_fmt == V4L2_PIX_FMT_XRGB32) ||
 	    (pix_fmt == V4L2_PIX_FMT_XBGR32) ||
 	    (pix_fmt == V4L2_PIX_FMT_BGR24)  ||
-	    (pix_fmt == V4L2_PIX_FMT_RGBA)   ||
+	    (pix_fmt == V4L2_PIX_FMT_RGBA32) ||
 	    (pix_fmt == V4L2_PIX_FMT_ABGR32) ||
 	    (pix_fmt == V4L2_PIX_FMT_ARGB32))
 		return true;
@@ -134,7 +140,7 @@ bool is_buf_active(struct mxc_isi_dev *mxc_isi, int buf_id)
 	return (buf_id == 1) ? ((reverse) ? (status & 0x100) : (status & 0x200)) :
 			       ((reverse) ? (status & 0x200) : (status & 0x100));
 }
-
+EXPORT_SYMBOL_GPL(is_buf_active);
 
 static void chain_buf(struct mxc_isi_dev *mxc_isi, struct mxc_isi_frame *frm)
 {
@@ -145,12 +151,55 @@ static void chain_buf(struct mxc_isi_dev *mxc_isi, struct mxc_isi_frame *frm)
 		val &= ~CHNL_CTRL_CHAIN_BUF_MASK;
 		val |= (CHNL_CTRL_CHAIN_BUF_2_CHAIN << CHNL_CTRL_CHAIN_BUF_OFFSET);
 		writel(val, mxc_isi->regs + CHNL_CTRL);
-	} else if (!mxc_isi->chain_buf) {
+		if (mxc_isi->chain)
+			regmap_write(mxc_isi->chain, CHNL_CTRL, CHNL_CTRL_CLK_EN_MASK);
+		mxc_isi->chain_buf = 1;
+	} else {
 		val = readl(mxc_isi->regs + CHNL_CTRL);
 		val &= ~CHNL_CTRL_CHAIN_BUF_MASK;
 		writel(val, mxc_isi->regs + CHNL_CTRL);
+		mxc_isi->chain_buf = 0;
 	}
 }
+
+struct device *mxc_isi_dev_get_parent(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct device_node *parent;
+	struct platform_device *parent_pdev;
+
+	if (!pdev)
+		return NULL;
+
+	/* Get parent for isi capture device */
+	parent = of_get_parent(dev->of_node);
+	parent_pdev = of_find_device_by_node(parent);
+	if (!parent_pdev) {
+		of_node_put(parent);
+		return NULL;
+	}
+	of_node_put(parent);
+
+	return &parent_pdev->dev;
+}
+EXPORT_SYMBOL_GPL(mxc_isi_dev_get_parent);
+
+struct mxc_isi_dev *mxc_isi_get_hostdata(struct platform_device *pdev)
+{
+	struct mxc_isi_dev *mxc_isi;
+
+	if (!pdev || !pdev->dev.parent)
+		return NULL;
+
+	mxc_isi = (struct mxc_isi_dev *)dev_get_drvdata(pdev->dev.parent);
+	if (!mxc_isi) {
+		dev_err(&pdev->dev, "Cann't get host data\n");
+		return NULL;
+	}
+
+	return mxc_isi;
+}
+EXPORT_SYMBOL_GPL(mxc_isi_get_hostdata);
 
 void mxc_isi_channel_set_outbuf(struct mxc_isi_dev *mxc_isi,
 				struct mxc_isi_buffer *buf)
@@ -200,6 +249,7 @@ void mxc_isi_channel_set_outbuf(struct mxc_isi_dev *mxc_isi,
 	}
 	writel(val, mxc_isi->regs + CHNL_OUT_BUF_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_set_outbuf);
 
 void mxc_isi_channel_set_m2m_src_addr(struct mxc_isi_dev *mxc_isi,
 			struct mxc_isi_buffer *buf)
@@ -211,6 +261,7 @@ void mxc_isi_channel_set_m2m_src_addr(struct mxc_isi_dev *mxc_isi,
 	paddr->y = vb2_dma_contig_plane_dma_addr(vb2_buf, 0);
 	writel(paddr->y, mxc_isi->regs + CHNL_IN_BUF_ADDR);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_set_m2m_src_addr);
 
 void mxc_isi_channel_sw_reset(struct mxc_isi_dev *mxc_isi)
 {
@@ -223,6 +274,7 @@ void mxc_isi_channel_sw_reset(struct mxc_isi_dev *mxc_isi)
 	val &= ~CHNL_CTRL_SW_RST;
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_sw_reset);
 
 void mxc_isi_channel_source_config(struct mxc_isi_dev *mxc_isi)
 {
@@ -268,6 +320,7 @@ void mxc_isi_channel_source_config(struct mxc_isi_dev *mxc_isi)
 
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_source_config);
 
 void mxc_isi_channel_set_flip(struct mxc_isi_dev *mxc_isi)
 {
@@ -283,6 +336,7 @@ void mxc_isi_channel_set_flip(struct mxc_isi_dev *mxc_isi)
 
 	writel(val, mxc_isi->regs + CHNL_IMG_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_set_chain_buf);
 
 void mxc_isi_channel_set_csc(struct mxc_isi_dev *mxc_isi,
 			     struct mxc_isi_frame *src_f,
@@ -566,6 +620,7 @@ void mxc_isi_channel_init(struct mxc_isi_dev *mxc_isi)
 	val |= (CHNL_CTRL_CLK_EN_ENABLE << CHNL_CTRL_CLK_EN_OFFSET);
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_init);
 
 void mxc_isi_channel_deinit(struct mxc_isi_dev *mxc_isi)
 {
@@ -575,9 +630,13 @@ void mxc_isi_channel_deinit(struct mxc_isi_dev *mxc_isi)
 	mxc_isi_channel_sw_reset(mxc_isi);
 
 	/* deinit channel clk first */
-	val = (CHNL_CTRL_CLK_EN_ENABLE << CHNL_CTRL_CLK_EN_OFFSET);
+	val = (CHNL_CTRL_CLK_EN_DISABLE << CHNL_CTRL_CLK_EN_OFFSET);
 	writel(val, mxc_isi->regs + CHNL_CTRL);
+
+	if (mxc_isi->chain_buf && mxc_isi->chain)
+		regmap_write(mxc_isi->chain, CHNL_CTRL, 0x0);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_deinit);
 
 void mxc_isi_channel_config(struct mxc_isi_dev *mxc_isi,
 			    struct mxc_isi_frame *src_f,
@@ -623,6 +682,7 @@ void mxc_isi_channel_config(struct mxc_isi_dev *mxc_isi,
 
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_config);
 
 void mxc_isi_clean_registers(struct mxc_isi_dev *mxc_isi)
 {
@@ -631,6 +691,7 @@ void mxc_isi_clean_registers(struct mxc_isi_dev *mxc_isi)
 	status = mxc_isi_get_irq_status(mxc_isi);
 	mxc_isi_clean_irq_status(mxc_isi, status);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_clean_registers);
 
 void mxc_isi_channel_enable(struct mxc_isi_dev *mxc_isi, bool m2m_enabled)
 {
@@ -660,6 +721,7 @@ void mxc_isi_channel_enable(struct mxc_isi_dev *mxc_isi, bool m2m_enabled)
 	dump_isi_regs(mxc_isi);
 	msleep(300);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_enable);
 
 void mxc_isi_channel_disable(struct mxc_isi_dev *mxc_isi)
 {
@@ -673,6 +735,7 @@ void mxc_isi_channel_disable(struct mxc_isi_dev *mxc_isi)
 	val |= (CHNL_CTRL_CLK_EN_DISABLE << CHNL_CTRL_CLK_EN_OFFSET);
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_channel_disable);
 
 void  mxc_isi_enable_irq(struct mxc_isi_dev *mxc_isi)
 {
@@ -701,21 +764,25 @@ void  mxc_isi_enable_irq(struct mxc_isi_dev *mxc_isi)
 
 	writel(val, mxc_isi->regs + CHNL_IER);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_enable_irq);
 
 void mxc_isi_disable_irq(struct mxc_isi_dev *mxc_isi)
 {
 	writel(0, mxc_isi->regs + CHNL_IER);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_disable_irq);
 
 u32 mxc_isi_get_irq_status(struct mxc_isi_dev *mxc_isi)
 {
 	return readl(mxc_isi->regs + CHNL_STS);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_get_irq_status);
 
 void mxc_isi_clean_irq_status(struct mxc_isi_dev *mxc_isi, u32 val)
 {
 	writel(val, mxc_isi->regs + CHNL_STS);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_clean_irq_status);
 
 void mxc_isi_m2m_config_src(struct mxc_isi_dev *mxc_isi,
 			    struct mxc_isi_frame *src_f)
@@ -737,6 +804,7 @@ void mxc_isi_m2m_config_src(struct mxc_isi_dev *mxc_isi,
 	val = src_f->bytesperline[0] << CHNL_IN_BUF_PITCH_LINE_PITCH_OFFSET;
 	writel(val, mxc_isi->regs + CHNL_IN_BUF_PITCH);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_m2m_config_src);
 
 void mxc_isi_m2m_config_dst(struct mxc_isi_dev *mxc_isi,
 			    struct mxc_isi_frame *dst_f)
@@ -755,6 +823,7 @@ void mxc_isi_m2m_config_dst(struct mxc_isi_dev *mxc_isi,
 	val |= dst_f->bytesperline[0] << CHNL_OUT_BUF_PITCH_LINE_PITCH_OFFSET;
 	writel(val, mxc_isi->regs + CHNL_OUT_BUF_PITCH);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_m2m_config_dst);
 
 void mxc_isi_m2m_start_read(struct mxc_isi_dev *mxc_isi)
 {
@@ -768,3 +837,4 @@ void mxc_isi_m2m_start_read(struct mxc_isi_dev *mxc_isi)
 	val |= CHNL_MEM_RD_CTRL_READ_MEM_ENABLE << CHNL_MEM_RD_CTRL_READ_MEM_OFFSET;
 	writel(val, mxc_isi->regs + CHNL_MEM_RD_CTRL);
 }
+EXPORT_SYMBOL_GPL(mxc_isi_m2m_start_read);

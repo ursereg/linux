@@ -30,7 +30,7 @@ CONFIG_SD8978=n
 CONFIG_USB8978=n
 CONFIG_SD8997=n
 CONFIG_USB8997=n
-CONFIG_PCIE8997=n
+CONFIG_PCIE8997=y
 CONFIG_SD8987=y
 CONFIG_SD9097=n
 CONFIG_USB9097=n
@@ -266,6 +266,7 @@ endif
 	ccflags-y += -Wno-stringop-overflow
 	ccflags-y += -Wno-tautological-compare
 	ccflags-y += -Wno-packed-bitfield-compat
+	ccflags-y += -Wno-stringop-truncation
 
 #############################################################################
 # Make Targets

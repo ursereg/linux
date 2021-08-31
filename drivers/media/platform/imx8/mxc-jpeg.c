@@ -554,6 +554,10 @@ static irqreturn_t mxc_jpeg_dec_irq(int irq, void *priv)
 
 	dst_buf = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+	if (!dst_buf || !src_buf) {
+		dev_err(dev, "No source or destination buffer.\n");
+		goto job_unlock;
+	}
 	jpeg_src_buf = vb2_to_mxc_buf(&src_buf->vb2_buf);
 
 	if (ctx->aborting) {
@@ -1286,8 +1290,6 @@ static int mxc_jpeg_parse(struct mxc_jpeg_ctx *ctx,
 		do {
 			byte = get_byte(&stream);
 		} while (byte == 0xff);
-		if (byte == -1)
-			return false;
 		if (byte == 0)
 			continue;
 		switch (byte) {

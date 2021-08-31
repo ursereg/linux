@@ -91,6 +91,11 @@ config DRM_SEC_MIPI_DSIM
 	help
 	  The Samsung MPI DSIM Bridge driver.
 
+config DRM_NXP_SEIKO_43WVFIG
+	tristate "Legacy Freescale Seiko 43WVFIG panel DPI adapter bridge"
+	select DRM_KMS_HELPER
+	select DRM_PANEL
+
 config DRM_NXP_PTN3460
 	tristate "NXP PTN3460 DP/LVDS bridge"
 	depends on OF
@@ -191,9 +196,12 @@ config DRM_ITE_IT6263
 	depends on OF
 	select DRM_KMS_HELPER
 	select REGMAP_I2C
+	select OF_DYNAMIC
 	---help---
 	  ITE IT6263 bridge chip driver.
 
 source "drivers/gpu/drm/bridge/sn65dsi83/Kconfig"
+
+source "drivers/gpu/drm/bridge/digi/Kconfig"
 
 endmenu

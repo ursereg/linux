@@ -49,17 +49,6 @@
 		stdout-path = &uart1;
 	};
 
-	leds {
-		compatible = "gpio-leds";
-
-		power {
-			label = "power:green:power";
-			default-state = "on";
-			linux,default-trigger = "default-on";
-			gpios = <&mca_gpio 13 GPIO_ACTIVE_HIGH>;
-		};
-	};
-
 	lvds_backlight: lvds_backlight {
 		compatible = "pwm-backlight";
 		pwms = <&mca_pwm0 4 100000 0>;
@@ -77,7 +66,7 @@
 				    100>;
 		default-brightness-level = <80>;
 		power-supply = <&reg_5v_board>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	/* fixed crystal dedicated to mcp2517fd */
@@ -292,17 +281,13 @@
 	sda-gpios = <&gpio5 17 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 
-	fusion_touch: fusion@10 {
-		compatible = "touchrev,fusion-touch";
-		reg = <0x10>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_touch>;
-		/* LVDS interrupt */
-		interrupt-parent = <&gpio4>;
-		interrupts = <28 IRQ_TYPE_EDGE_FALLING>;
-		status = "disabled";
-	};
-
+	/*
+	 * An inconsistent reset sequence makes
+	 * the Goodix display's touch controller respond on one of two I2C
+	 * addresses: 0x14 and 0x5D. To make sure the touchscreen
+	 * works every time, the touch controller's description must
+	 * be duplicated for both addresses.
+	 */
 	goodix_touch: gt9271@14 {
 		compatible = "goodix,gt9271";
 		reg = <0x14>;
@@ -315,21 +300,49 @@
 		reload-fw-on-resume;
 		skip-firmware-request;
 		vin-supply = <&reg_5v_board>;
+		status = "disabled";
+	};
+
+	goodix_touch2: gt9271@5d {
+		compatible = "goodix,gt9271";
+		reg = <0x5d>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_touch>;
+		/* LVDS interrupt */
+		interrupt-parent = <&gpio4>;
+		interrupts = <28 IRQ_TYPE_EDGE_FALLING>;
+		irq-gpios = <&gpio4 28 GPIO_ACTIVE_LOW>;
+		reload-fw-on-resume;
+		skip-firmware-request;
+		vin-supply = <&reg_5v_board>;
+		status = "disabled";
+	};
+
+	/* Touch on Fusion 10" display */
+	fusion_touch: fusion@14 {
+		compatible = "touchrev,fusion-touch";
+		reg = <0x14>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_touch>;
+		/* LVDS interrupt */
+		interrupt-parent = <&gpio4>;
+		interrupts = <28 IRQ_TYPE_EDGE_FALLING>;
+		status = "disabled";
 	};
 
 	/* MIPI-CSI camera */
 	ov5640_mipi: ov5640_mipi@3c {
-		compatible = "ovti,ov5640_mipi_v3";
+		compatible = "ovti,ov5640";
 		reg = <0x3c>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_mipi>;
 		clocks = <&clk IMX8MN_CLK_CLKO1>;
-		clock-names = "csi_mclk";
+		clock-names = "xclk";
 		assigned-clocks = <&clk IMX8MN_CLK_CLKO1>;
 		assigned-clock-parents = <&clk IMX8MN_CLK_24M>;
 		assigned-clock-rates = <24000000>;
 		csi_id = <0>;
-		rst-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
 		mclk = <24000000>;
 		mclk_source = <0>;
 		mipi_csi;
@@ -337,6 +350,8 @@
 		port {
 			ov5640_mipi_ep: endpoint {
 				remote-endpoint = <&mipi_csi0_ep>;
+				data-lanes = <1 2>;
+				clocks-lanes = <0>;
 			};
 		};
 	};
@@ -423,6 +438,7 @@
 		reset-gpios = <&gpio3 7 GPIO_ACTIVE_LOW>;
 		hpd-gpios = <&gpio3 8 GPIO_ACTIVE_HIGH>;
 		digi,dsi-lanes = <4>;
+		vdd1-supply = <&reg_5v_board>;
 		no-edid;
 		status = "okay";
 
@@ -555,6 +571,21 @@
 	status = "okay";
 };
 
+/* Power LED on MCA_IO13 */
+&mca_led {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	led@0 {
+		reg = <0>;
+		label = "power:green";
+		io = <13>;
+		linux,default-trigger = "default-on";
+		retain-state-suspended;
+	};
+};
+
 &mipi_csi_1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -647,8 +678,8 @@
 	 * Choose the ones that match your DVK version.
 	 */
 	//fsl,uart-has-rtscts;
-	//For DVK: version >= 3
-	//pinctrl-0 = <&pinctrl_uart3>, <&pinctrl_uart3_re_disable>;
+	//For DVK: version >= 3 (R291, R292 and R359 on the DVK must be removed)
+	//pinctrl-0 = <&pinctrl_uart3>;
 	//For DVK: version <= 2
 	//pinctrl-0 = <&pinctrl_uart3>, <&pinctrl_uart3_re_disable_v1_v2>;
 
@@ -706,7 +737,7 @@
 			/* User LED 3 */
 			MX8MN_IOMUXC_SD2_RESET_B_GPIO2_IO19	0x16
 			/* User button 2 */
-			MX8MN_IOMUXC_SD2_WP_GPIO2_IO20	0x16
+			MX8MN_IOMUXC_SD2_WP_GPIO2_IO20	0x156
 			/*
 			 * Expansion I2C port IRQ.
 			 * Remove if you plan on using this line for a device
@@ -945,16 +976,6 @@
 			MX8MN_IOMUXC_ECSPI1_MOSI_UART3_DCE_TX		0x140
 			MX8MN_IOMUXC_ECSPI1_SS0_UART3_DCE_RTS_B		0x140
 			MX8MN_IOMUXC_ECSPI1_MISO_UART3_DCE_CTS_B	0x140
-		>;
-	};
-
-	pinctrl_uart3_re_disable: uart3grp_re_disable {
-		fsl,pins = <
-			/*
-			 * Configure RS485 RE#/DE line as pull-up to disable
-			 * RS485 transceiver.
-			 */
-			MX8MN_IOMUXC_ECSPI1_MISO_GPIO5_IO8		0x140
 		>;
 	};
 

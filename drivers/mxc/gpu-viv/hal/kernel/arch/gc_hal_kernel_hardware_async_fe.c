@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2019 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2019 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -636,35 +636,31 @@ gckASYNC_FE_Execute(
     IN gctUINT32 Bytes
     )
 {
-    gceSTATUS status;
+    gceSTATUS status = gcvSTATUS_OK;
 
-    status = gckOS_WriteRegisterEx(
+    gcmkHEADER_ARG("Hardware=%p Address=%x Bytes=%lu", Hardware, Address, Bytes);
+
+    gcmkONERROR(gckOS_WriteRegisterEx(
         Hardware->os,
         Hardware->core,
         0x007DC,
         Address
-        );
-    if (gcmIS_ERROR(status))
-    {
-        return status;
-    }
+        ));
 
-    gckOS_MemoryBarrier(
+    gcmkONERROR(gckOS_MemoryBarrier(
         Hardware->os,
         gcvNULL
-        );
+        ));
 
-    status = gckOS_WriteRegisterEx(
+    gcmkONERROR(gckOS_WriteRegisterEx(
         Hardware->os,
         Hardware->core,
         0x007E0,
         Address + Bytes
-        );
-    if (gcmIS_ERROR(status))
-    {
-        return status;
-    }
+        ));
 
-    return gcvSTATUS_OK;
+OnError:
+    gcmkFOOTER();
+    return status;
 }
 

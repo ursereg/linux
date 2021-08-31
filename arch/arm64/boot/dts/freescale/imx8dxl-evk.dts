@@ -81,6 +81,11 @@
 			no-map;
 		};
 
+		rsc-table {
+			reg = <0 0x900ff000 0 0x1000>;
+			no-map;
+		};
+
 		vdevbuffer: vdevbuffer {
                         compatible = "shared-dma-pool";
 			reg = <0 0x90400000 0 0x100000>;
@@ -186,14 +191,8 @@
 		regulator-max-microvolt = <3300000>;
 		regulator-name = "clk_ext_sel";
 		gpio = <&pca6416_1 10 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
 		regulator-always-on;
-	};
-
-	clock_mclk_out1: clock_mclk_out1 {
-		compatible = "gpio-gate-clock";
-		clocks = <&mclkout1_lpcg 0>;
-		#clock-cells = <0>;
-		enable-gpios = <&pca6416_1 4 GPIO_ACTIVE_HIGH>;
 	};
 
 	sound-wm8960 {
@@ -297,7 +296,6 @@
 &flexspi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_flexspi0>;
-	interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;
 	status = "okay";
 
 	mt35xu512aba0: flash@0 {
@@ -382,7 +380,8 @@
 			wm8960_1: wm8960@1a {
 				compatible = "wlf,wm8960";
 				reg = <0x1a>;
-				clocks = <&clock_mclk_out1>;
+				pinctrl-assert-gpios = <&pca6416_1 4 GPIO_ACTIVE_HIGH>;
+				clocks = <&mclkout1_lpcg 0>;
 				clock-names = "mclk";
 				wlf,shared-lrclk;
 				assigned-clocks = <&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_PLL>,
@@ -401,7 +400,8 @@
 			wm8960_2: wm8960@1a {
 				compatible = "wlf,wm8960";
 				reg = <0x1a>;
-				clocks = <&clock_mclk_out1>;
+				pinctrl-assert-gpios = <&pca6416_1 4 GPIO_ACTIVE_HIGH>;
+				clocks = <&mclkout1_lpcg 0>;
 				clock-names = "mclk";
 				wlf,shared-lrclk;
 				assigned-clocks = <&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_PLL>,
@@ -420,7 +420,8 @@
 			wm8960_3: wm8960@1a {
 				compatible = "wlf,wm8960";
 				reg = <0x1a>;
-				clocks = <&clock_mclk_out1>;
+				pinctrl-assert-gpios = <&pca6416_1 4 GPIO_ACTIVE_HIGH>;
+				clocks = <&mclkout1_lpcg 0>;
 				clock-names = "mclk";
 				wlf,shared-lrclk;
 				assigned-clocks = <&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_PLL>,
@@ -506,6 +507,10 @@
 	};
 };
 
+&cm40_intmux {
+	status = "okay";
+};
+
 &lpuart0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpuart0>;
@@ -516,6 +521,12 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpuart1>;
 	resets = <&modem_reset>;
+	status = "okay";
+};
+
+&cm40_lpuart {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_cm40_lpuart>;
 	status = "okay";
 };
 
@@ -549,7 +560,14 @@
 	reset-gpio = <&lsio_gpio4 0 GPIO_ACTIVE_LOW>;
 	ext_osc = <0>;
 	epdev_on-supply = <&epdev_on>;
-	reserved-region = <&rpmsg_reserved>;
+	status = "okay";
+};
+
+&pcieb_ep{
+	compatible = "fsl,imx8qxp-pcie-ep";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pcieb>;
+	ext_osc = <0>;
 	status = "disabled";
 };
 
@@ -701,7 +719,8 @@
 };
 
 &usbphy1 {
-        status = "okay";
+	status = "okay";
+	fsl,tx-d-cal=<114>;
 };
 
 &usbotg1 {
@@ -717,6 +736,7 @@
 
 &usbphy2 {
 	status = "okay";
+	fsl,tx-d-cal=<111>;
 };
 
 &usbotg2 {
@@ -853,6 +873,13 @@
                        >;
                };
 
+		pinctrl_cm40_lpuart: cm40_lpuartgrp {
+			fsl,pins = <
+				IMX8DXL_ADC_IN2_M40_UART0_RX		0x06000020
+				IMX8DXL_ADC_IN3_M40_UART0_TX		0x06000020
+			>;
+		};
+
 		pinctrl_flexcan2: flexcan2grp {
 			fsl,pins = <
 				IMX8DXL_UART2_TX_ADMA_FLEXCAN1_TX	0x00000021
@@ -871,7 +898,7 @@
 			fsl,pins = <
 				IMX8DXL_FLEXCAN0_RX_ADMA_SAI1_TXC     0x06000040
 				IMX8DXL_FLEXCAN0_TX_ADMA_SAI1_TXFS    0x06000040
-				IMX8DXL_FLEXCAN1_RX_ADMA_SAI1_TXD     0x06000040
+				IMX8DXL_FLEXCAN1_RX_ADMA_SAI1_TXD     0x06000060
 				IMX8DXL_FLEXCAN1_TX_ADMA_SAI1_RXD     0x06000060
 			>;
 		};

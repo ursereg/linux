@@ -1703,6 +1703,8 @@ static int ov5640_probe(struct i2c_client *client,
 	struct ov5640 *sensor;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
+		return -ENOMEM;
 
 	/* ov5640 pinctrl */
 	pinctrl = devm_pinctrl_get_select_default(dev);
@@ -1730,6 +1732,7 @@ static int ov5640_probe(struct i2c_client *client,
 	else {
 		retval = devm_gpio_request_one(dev, sensor->rst_gpio,
 				GPIOF_OUT_INIT_HIGH, "ov5640_mipi_reset");
+		mdelay(20);
 		if (retval < 0) {
 			dev_warn(dev, "Failed to set reset pin\n");
 			return retval;

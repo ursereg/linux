@@ -137,8 +137,26 @@ static int mxsfb_atomic_helper_check(struct drm_device *dev,
 	return ret;
 }
 
+static struct drm_framebuffer *
+mxsfb_fb_create(struct drm_device *dev, struct drm_file *file_priv,
+		const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+	const struct drm_format_info *info;
+
+	info = drm_get_format_info(dev, mode_cmd);
+	if (!info)
+		return ERR_PTR(-EINVAL);
+
+	if (mode_cmd->width * info->cpp[0] != mode_cmd->pitches[0]) {
+		dev_dbg(dev->dev, "Invalid pitch: fb width must match pitch\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	return drm_gem_fb_create(dev, file_priv, mode_cmd);
+}
+
 static const struct drm_mode_config_funcs mxsfb_mode_config_funcs = {
-	.fb_create		= drm_gem_fb_create,
+	.fb_create		= mxsfb_fb_create,
 	.atomic_check		= mxsfb_atomic_helper_check,
 	.atomic_commit		= drm_atomic_helper_commit,
 };
@@ -161,7 +179,7 @@ enum drm_mode_status mxsfb_pipe_mode_valid(struct drm_crtc *crtc,
 	else
 		bpp = pipe->plane.state->fb->format->depth;
 
-	bw = mode->clock * 1000;
+	bw = (u64)mode->clock * 1000;
 	bw = bw * mode->hdisplay * mode->vdisplay * (bpp / 8);
 	bw = div_u64(bw, mode->htotal * mode->vtotal);
 

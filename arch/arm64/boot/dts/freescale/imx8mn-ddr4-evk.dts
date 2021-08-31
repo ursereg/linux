@@ -36,6 +36,13 @@
 		#reset-cells = <0>;
 	};
 
+	ir_recv: ir-receiver {
+		compatible = "gpio-ir-receiver";
+		gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_ir_recv>;
+	};
+
 	usdhc1_pwrseq: usdhc1_pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		pinctrl-names = "default";
@@ -125,6 +132,12 @@
 
 &iomuxc {
 	pinctrl-names = "default";
+
+	pinctrl_ir_recv: ir-recv {
+		fsl,pins = <
+			MX8MN_IOMUXC_GPIO1_IO13_GPIO1_IO13              0x4f
+		>;
+	};
 
 	pinctrl_fec1: fec1grp {
 		fsl,pins = <
@@ -530,6 +543,7 @@
 		reg = <0x10>;
 		AVDD-supply = <&reg_audio_board>;
 		DVDD-supply = <&reg_audio_board>;
+		status = "disabled";
 	};
 
 	ak4458_2: ak4458@12 {
@@ -537,6 +551,7 @@
 		reg = <0x12>;
 		AVDD-supply = <&reg_audio_board>;
 		DVDD-supply = <&reg_audio_board>;
+		status = "disabled";
 	};
 
 	ak5558: ak5558@13 {
@@ -545,6 +560,7 @@
 		ak5558,pdn-gpio = <&pca6416 3 GPIO_ACTIVE_HIGH>;
 		AVDD-supply = <&reg_audio_board>;
 		DVDD-supply = <&reg_audio_board>;
+		status = "disabled";
 	};
 
 	ak4497: ak4497@11 {
@@ -553,6 +569,7 @@
 		ak4497,pdn-gpio = <&pca6416 5 GPIO_ACTIVE_HIGH>;
 		AVDD-supply = <&reg_audio_board>;
 		DVDD-supply = <&reg_audio_board>;
+		status = "disabled";
 	};
 
 	ov5640_mipi_0: ov5640_mipi@3c {
