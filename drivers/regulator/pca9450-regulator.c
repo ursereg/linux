@@ -69,6 +69,56 @@ static const unsigned int pca9450_dvs_buck_ramp_table[] = {
 	25000, 12500, 6250, 3125
 };
 
+static int pca9450_ldo_suspend_do_enable(struct regulator_dev *rdev, bool en)
+{
+	struct regmap *rmap = rdev_get_regmap(rdev);
+	int id = rdev->desc->id - PCA9450_LDO1;
+	unsigned int ldoctrl[5] = {PCA9450_REG_LDO1CTRL, PCA9450_REG_LDO2CTRL,
+				   PCA9450_REG_LDO3CTRL, PCA9450_REG_LDO4CTRL,
+				   PCA9450_REG_LDO5CTRL_L};
+
+	dev_dbg(rdev_get_dev(rdev), "LDO[%d] suspend state=%s\n", id + 1, en ? "on" : "off");
+
+	return regmap_update_bits(rmap, ldoctrl[id], LDO1_EN_MASK,
+				  en ? LDO_ENMODE_ONREQ  :
+				  LDO_ENMODE_ONREQ_STBYREQ);
+}
+
+static int pca9450_ldo_suspend_enable(struct regulator_dev *rdev)
+{
+	return pca9450_ldo_suspend_do_enable(rdev, true);
+}
+
+static int pca9450_ldo_suspend_disable(struct regulator_dev *rdev)
+{
+	return pca9450_ldo_suspend_do_enable(rdev, false);
+}
+
+static int pca9450_buck_suspend_do_enable(struct regulator_dev *rdev, bool en)
+{
+	struct regmap *rmap = rdev_get_regmap(rdev);
+	int id = rdev->desc->id;
+	unsigned int buckctrl[6] = {PCA9450_REG_BUCK1CTRL, PCA9450_REG_BUCK2CTRL,
+				    PCA9450_REG_BUCK3CTRL, PCA9450_REG_BUCK4CTRL,
+				    PCA9450_REG_BUCK5CTRL, PCA9450_REG_BUCK6CTRL};
+
+	dev_dbg(rdev_get_dev(rdev), "Buck[%d] suspend state=%s\n", id + 1, en ? "on" : "off");
+
+	return regmap_update_bits(rmap, buckctrl[id], BUCK1_ENMODE_MASK,
+				  en ? BUCK_ENMODE_ONREQ :
+				  BUCK_ENMODE_ONREQ_STBYREQ);
+}
+
+static int pca9450_buck_suspend_enable(struct regulator_dev *rdev)
+{
+	return pca9450_buck_suspend_do_enable(rdev, true);
+}
+
+static int pca9450_buck_suspend_disable(struct regulator_dev *rdev)
+{
+	return pca9450_buck_suspend_do_enable(rdev, false);
+}
+
 static const struct regulator_ops pca9450_dvs_buck_regulator_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = regulator_disable_regmap,
@@ -78,6 +128,8 @@ static const struct regulator_ops pca9450_dvs_buck_regulator_ops = {
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.set_voltage_time_sel = regulator_set_voltage_time_sel,
 	.set_ramp_delay	= regulator_set_ramp_delay_regmap,
+	.set_suspend_enable = pca9450_buck_suspend_enable,
+	.set_suspend_disable = pca9450_buck_suspend_disable,
 };
 
 static const struct regulator_ops pca9450_buck_regulator_ops = {
@@ -88,6 +140,8 @@ static const struct regulator_ops pca9450_buck_regulator_ops = {
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.set_voltage_time_sel = regulator_set_voltage_time_sel,
+	.set_suspend_enable = pca9450_buck_suspend_enable,
+	.set_suspend_disable = pca9450_buck_suspend_disable,
 };
 
 static const struct regulator_ops pca9450_ldo_regulator_ops = {
@@ -97,6 +151,8 @@ static const struct regulator_ops pca9450_ldo_regulator_ops = {
 	.list_voltage = regulator_list_voltage_linear_range,
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
+	.set_suspend_enable = pca9450_ldo_suspend_enable,
+	.set_suspend_disable = pca9450_ldo_suspend_disable,
 };
 
 /*
@@ -921,12 +977,15 @@ static int pca9450_i2c_probe(struct i2c_client *i2c,
 	struct regulator_config config = { };
 	struct pca9450 *pca9450;
 	unsigned int device_id, i;
+	unsigned int irq_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
 	int ret;
 
 	if (!i2c->irq) {
 		dev_err(&i2c->dev, "No IRQ configured?\n");
 		return -EINVAL;
 	}
+
+	of_property_read_u32(i2c->dev.of_node, "interrupt-flags", &irq_flags);
 
 	pca9450 = devm_kzalloc(&i2c->dev, sizeof(struct pca9450), GFP_KERNEL);
 	if (!pca9450)
@@ -1001,7 +1060,7 @@ static int pca9450_i2c_probe(struct i2c_client *i2c,
 
 	ret = devm_request_threaded_irq(pca9450->dev, pca9450->irq, NULL,
 					pca9450_irq_handler,
-					(IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+					irq_flags,
 					"pca9450-irq", pca9450);
 	if (ret != 0) {
 		dev_err(pca9450->dev, "Failed to request IRQ: %d\n",
@@ -1046,9 +1105,10 @@ static int pca9450_i2c_probe(struct i2c_client *i2c,
 		return PTR_ERR(pca9450->sd_vsel_gpio);
 	}
 
-	dev_info(&i2c->dev, "%s probed.\n",
+	dev_info(&i2c->dev, "%s probed (irq-flags %x)\n",
 		type == PCA9450_TYPE_PCA9450A ? "pca9450a" :
-		(type == PCA9450_TYPE_PCA9451A ? "pca9451a" : "pca9450bc"));
+		(type == PCA9450_TYPE_PCA9451A ? "pca9451a" : "pca9450bc"),
+		irq_flags);
 
 	return 0;
 }

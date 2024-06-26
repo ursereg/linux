@@ -1,5 +1,5 @@
 /*
- * Copyright 2016, 2017 Digi International, Inc.
+ * Copyright 2016-2023 Digi International, Inc.
  *
  * The code contained herein is licensed under the GNU General Public
  * License. You may obtain a copy of the GNU General Public License
@@ -119,12 +119,16 @@
 
 		ethphy0: ethernet-phy@0 {
 			compatible = "ethernet-phy-ieee802.3-c22";
+			clocks = <&clks IMX6UL_CLK_ENET_REF>;
+			clock-names = "refclk";
 			smsc,disable-energy-detect;
 			reg = <0>;
 		};
 
 		ethphy1: ethernet-phy@1 {
 			compatible = "ethernet-phy-ieee802.3-c22";
+			clocks = <&clks IMX6UL_CLK_ENET2_REF>;
+			clock-names = "refclk";
 			smsc,disable-energy-detect;
 			reg = <1>;
 		};
@@ -413,13 +417,13 @@
 	dr_mode = "otg";
 	vbus-supply = <&reg_usb_otg1_vbus>;
 	pinctrl-0 = <&pinctrl_usbotg1>;
-	digi,power-line-active-high;
+	power-active-high;
 	status = "disabled";
 };
 
 &usbotg2 {
 	dr_mode = "host";
-	digi,power-line-active-high;
+	power-active-high;
 	disable-over-current;
 	status = "disabled";
 };
