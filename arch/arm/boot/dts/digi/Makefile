@@ -26,4 +26,5 @@ dtb-$(CONFIG_SOC_IMX6UL) += \
 	imx6ul-ccimx6ulstarter.dtb \
 	imx6ul-ccimx6ulstarter-id129.dtb \
 	imx6ul-ccimx6ulstarter-wb.dtb \
-	imx6ul-ccimx6ulstarter-wb-mfg.dtb
+	imx6ul-ccimx6ulstarter-wb-mfg.dtb \
+	imx6ul-hydrabox.dtb
