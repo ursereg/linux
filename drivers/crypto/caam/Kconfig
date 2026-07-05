@@ -181,22 +181,6 @@ config CRYPTO_DEV_FSL_CAAM_RNG_ERRATA
 	  enable SW tests for TRNG output data. Then, instantiate DRBG
 	  in deterministic mode.
 
-config CAAM_ALLOW_DEINST_RNG
-	bool "Allow deinstantiating a bootloader-initialized CAAM RNG at probe"
-	depends on CRYPTO_DEV_FSL_CAAM_RNG_API
-	help
-	  When the bootloader (u-boot) has already instantiated a CAAM RNG4
-	  state handle (e.g. for HAB), the kernel assumes the TRNG entropy
-	  parameters are set and skips kick_trng(). After a warm reset the
-	  TRNG entropy source is stale, so instantiating the remaining state
-	  handle can hang the boot (observed on i.MX6UL: SH0 re-instantiates,
-	  SH1 hangs right after "crng init done").
-
-	  Selecting this compiles the "deinst_rng=1" kernel command-line
-	  option, which deinstantiates the pre-initialized RNG at probe so the
-	  kernel re-kicks the TRNG and instantiates both state handles cleanly.
-	  This keeps the hardware TRNG (unlike CRYPTO_DEV_FSL_CAAM_RNG_ERRATA).
-
 config CRYPTO_DEV_FSL_CAAM_TK_API
 	bool "Register tagged key cryptography implementations with Crypto API"
 	default y
