@@ -586,6 +586,9 @@ CONFIG_CRYPTO_TGR192=y
 CONFIG_CRYPTO_DEV_FSL_CAAM=y
 CONFIG_CRYPTO_DEV_FSL_CAAM_SM=y
 CONFIG_CRYPTO_DEV_FSL_CAAM_KEYBLOB=y
+# Fixes warm-reboot hang: deinstantiate the u-boot-initialized RNG at probe so
+# the kernel re-kicks the TRNG (needs "deinst_rng=1" bootarg, set in boot.txt).
+CONFIG_CAAM_ALLOW_DEINST_RNG=y
 CONFIG_FONT_8x8=y
 CONFIG_FONT_8x16=y
 CONFIG_MAGIC_SYSRQ=y
