@@ -21,6 +21,46 @@
 
 / {
 	model = "Hydrabox (Digi ConnectCore 6UL)";
+
+	/*
+	 * LEDs and button are addressed by NAME (kernel class devices), not by
+	 * gpio number: kernel 6.6 numbers gpiochips dynamically. See
+	 * hydra-docs/yocto/gpio-migration.md.
+	 */
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_leds>;
+
+		/* green, formerly gpio 75 -> /sys/class/leds/user-led-prot */
+		user-led-prot {
+			label = "user-led-prot";
+			gpios = <&gpio3 11 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		/* red, on the MCA expander, formerly gpio 504 */
+		user-led-power {
+			label = "user-led-power";
+			gpios = <&mca_gpio 0 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		/* input device name userspace matches on (see gpio-migration.md) */
+		label = "user-button";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gpiokeys>;
+
+		user-button {
+			label = "user-button";
+			gpios = <&gpio3 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_CONFIG>;
+			debounce-interval = <50>;
+		};
+	};
 };
 
 /*
@@ -198,10 +238,9 @@
                MX6UL_PAD_LCD_DATA07__GPIO3_IO12 0x10b0
                /* SPI_RESET */
                MX6UL_PAD_LCD_DATA01__GPIO3_IO06 0x10b0
-               /* USER_LED */
-               MX6UL_PAD_LCD_DATA06__GPIO3_IO11 0x10b0
-               /* USER_BUTTON */
-               MX6UL_PAD_LCD_VSYNC__GPIO3_IO03 0x10b0
+               /* USER_LED / USER_BUTTON are muxed by their own pinctrl
+                * groups (pinctrl_leds / pinctrl_gpiokeys) so the gpio-leds /
+                * gpio-keys nodes own those pins, not the hog. */
                /* GPS_RESET */
                MX6UL_PAD_LCD_DATA00__GPIO3_IO05 0x10b0
                /* 3G_RESET */
@@ -216,6 +255,18 @@
        pinctrl_adc1: adc1grp {
            fsl,pins = <
                MX6UL_PAD_GPIO1_IO04__GPIO1_IO04 0xb0
+           >;
+       };
+       pinctrl_leds: ledsgrp {
+           fsl,pins = <
+               /* USER_LED_PROT (green) */
+               MX6UL_PAD_LCD_DATA06__GPIO3_IO11 0x10b0
+           >;
+       };
+       pinctrl_gpiokeys: gpiokeysgrp {
+           fsl,pins = <
+               /* USER_BUTTON */
+               MX6UL_PAD_LCD_VSYNC__GPIO3_IO03 0x10b0
            >;
        };
        pinctrl_i2c2: i2c2grp {
@@ -247,4 +298,30 @@
         };
    };
 
+};
+
+/*
+ * Stable line names for the GPIOs driven from userspace via libgpiod
+ * (gpiofind/gpioset/gpioget by name). Indexed from line 0; gaps padded with "".
+ * LEDs (gpio3.11) and the button (gpio3.3) are intentionally left unnamed here
+ * because they are owned by the gpio-leds / gpio-keys class devices above.
+ */
+&gpio1 {
+	gpio-line-names =
+		"", "", "", "", "", "", "", "",
+		"", "", "", "", "", "", "", "",
+		"", "", "", "", "", "", "rs485-de";
+};
+
+&gpio3 {
+	gpio-line-names =
+		"", "", "", "", "", "gps-reset", "", "modem-power",
+		"modem-reset", "", "oc-drive", "", "oc-sense";
+};
+
+&gpio4 {
+	gpio-line-names =
+		"", "", "", "", "", "", "", "",
+		"", "", "", "", "", "", "", "",
+		"", "usb-vbus-hub", "usb-vbus-gps";
 };
