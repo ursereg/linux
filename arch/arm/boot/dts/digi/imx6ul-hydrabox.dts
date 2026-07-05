@@ -328,3 +328,15 @@
 		"", "", "", "", "", "", "", "",
 		"", "usb-vbus-hub", "usb-vbus-gps";
 };
+
+/*
+ * GPIO5_IO09 = BT_EN (Bluetooth enable/reset for the QCA6174 on the SOM;
+ * pinctrl_uart1_gpio in imx6ul-ccimx6ul-wb.dtsi). bluetooth-init power-cycles it
+ * to bring up the BT controller. Named so it resolves via gpiofind on kernel 6.6
+ * (GPIO5 is gpiochip4, so the old "gpio5 9" no longer works). See gpio-migration.md.
+ */
+&gpio5 {
+	gpio-line-names =
+		"", "", "", "", "", "", "", "",
+		"", "bt-enable";
+};
