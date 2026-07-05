@@ -173,9 +173,12 @@
 //	digi,tamper-if-list = <0 1 2 3>;
 //};
 
-/* PWM1 (Raspberry PI Expansion header) */
+/* PWM1 (Raspberry PI Expansion header) — disabled: its pinmux (pwm1grp) claims
+ * MX6UL_PAD_LCD_DATA00, which the hog uses as GPIO3_IO05 (gps-reset). Leaving pwm1
+ * enabled just produces a boot-time pinctrl conflict ("cannot claim pin 70") since
+ * the hog wins; the RPi-header PWM is unused on hydrabox. */
 &pwm1 {
-	status = "okay";
+	status = "disabled";
 };
 
 /* UART2 */
