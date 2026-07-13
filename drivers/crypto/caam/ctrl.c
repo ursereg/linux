@@ -740,14 +740,19 @@ static int caam_ctrl_rng_init(struct device *dev)
 			int inst_handles =
 				rd_reg32(&ctrl->r4tst[0].rdsta) & RDSTA_MASK;
 			/*
-			 * If either SH were instantiated by somebody else
-			 * (e.g. u-boot) then it is assumed that the entropy
-			 * parameters are properly set and thus the function
-			 * setting these (kick_trng(...)) is skipped.
-			 * Also, if a handle was instantiated, do not change
-			 * the TRNG parameters.
+			 * Skip kick_trng() only while a state handle is
+			 * currently instantiated (u-boot left a good handle, so
+			 * keep its TRNG parameters). Gating on the live RDSTA
+			 * read (inst_handles) instead of the value captured at
+			 * probe (rng4_sh_init) is deliberate: when u-boot left a
+			 * handle without prediction resistance, instantiate_rng()
+			 * tears it down, and on a warm reset the TRNG entropy is
+			 * stale. Re-kicking the TRNG on the next iteration (once
+			 * the handle is gone) gives the re-instantiation fresh
+			 * entropy instead of spinning on -EAGAIN forever with the
+			 * entropy delay frozen (the warm-reboot boot hang).
 			 */
-			if (!(ctrlpriv->rng4_sh_init || inst_handles)) {
+			if (!inst_handles) {
 				dev_info(dev,
 					 "Entropy delay = %u\n",
 					 ent_delay);
