@@ -348,7 +348,15 @@ CONFIG_CRYPTO_GHASH=y
 CONFIG_CRYPTO_MD5=y
 CONFIG_CRYPTO_SHA1=y
 CONFIG_CRYPTO_USER_API_HASH=y
-CONFIG_CRYPTO_DEV_FSL_CAAM_SECVIO=y
+# CAAM disabled deliberately. Its controller probe (caam_ctrl_rng_init() in
+# drivers/crypto/caam/ctrl.c, called unconditionally from caam_probe()) tears down
+# and re-instantiates RNG4 state that persists in the always-on SNVS domain across
+# warm resets, and that path hangs the boot: an OTA soak needed a power cycle on 5
+# of 10 updates, every failure preceded by "RNG4 SH0 ... Tearing it down". The board
+# does not need the hardware crypto engine (software crypto + cryptodev cover it,
+# TrustFence is not provisioned), so removing the driver removes the failure class
+# instead of bounding the retry loop. See hydra-docs/yocto/ISSUES.md issue 5.
+# CONFIG_CRYPTO_DEV_FSL_CAAM is not set
 CONFIG_CRC_T10DIF=y
 CONFIG_DMA_CMA=y
 CONFIG_CMA_SIZE_MBYTES=0
